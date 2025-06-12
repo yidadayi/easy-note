@@ -187,8 +187,23 @@ document.addEventListener('DOMContentLoaded', function() {
         
         logInfo('App', '应用初始化完成');
     } catch (error) {
-        console.error('初始化应用时出错:', error);
-        alert('初始化应用失败，请刷新页面重试: ' + error.message);
+        // 更详细地记录错误信息
+        const errorDetails = {
+            message: error?.message || '未知错误',
+            stack: error?.stack,
+            type: error?.constructor?.name || typeof error
+        };
+        console.error('初始化应用时出错:', errorDetails);
+        
+        // 显示用户友好的错误消息
+        const errorEl = document.getElementById('errorMessage');
+        if (errorEl) {
+            errorEl.textContent = '初始化应用失败，请刷新页面重试: ' + (error?.message || '未知错误');
+            errorEl.classList.remove('d-none');
+        } else {
+            // 如果错误元素不存在，回退到alert
+            alert('初始化应用失败，请刷新页面重试: ' + (error?.message || '未知错误'));
+        }
     }
 });
 
@@ -2243,8 +2258,8 @@ function init() {
         // 根据设置启用或禁用云同步
         // 确保DOM元素已经加载后再设置单选按钮状态
         try {
-            const cloudRadio = document.getElementById('cloudStorageRadio');
-            const localRadio = document.getElementById('localStorageRadio');
+            const cloudRadio = document.getElementById('useGitHub');
+            const localRadio = document.getElementById('useLocalOnly');
             
             if (cloudRadio && localRadio) {
                 cloudRadio.checked = cloudSyncEnabled;
@@ -2321,7 +2336,14 @@ function init() {
         
         logInfo('Init', '应用初始化完成');
     } catch (error) {
-        logError('Init', '应用初始化失败', error);
+        // 更详细地记录错误信息
+        const errorDetails = {
+            message: error?.message || '未知错误',
+            stack: error?.stack,
+            type: error?.constructor?.name || typeof error
+        };
+        logError('Init', '应用初始化失败', errorDetails);
+        console.error('初始化应用详细错误:', error);
         throw error; // 重新抛出错误以便主try-catch块捕获
     }
 }
@@ -3973,8 +3995,8 @@ function populateSettingsModal() {
     tokenField.value = GITHUB_TOKEN || '';
     
     // 填充云存储选项
-    document.getElementById('cloudStorageRadio').checked = isCloudStorageEnabled();
-    document.getElementById('localStorageRadio').checked = !isCloudStorageEnabled();
+    document.getElementById('useGitHub').checked = isCloudStorageEnabled();
+    document.getElementById('useLocalOnly').checked = !isCloudStorageEnabled();
     
     // 显示已保存的笔记ID
     if (currentNoteId) {
@@ -4009,7 +4031,16 @@ function updateCloudStatusDisplay() {
     tooltip.textContent = '正在检查GitHub连接...';
     
     // 执行实际的连接检查
-    checkGitHubConnection();
+    checkCloudConnectivity().catch(error => {
+        logError('Cloud', '检查云连接出错', error);
+    });
 }
 
-// 删除重复的initApp函数
+// 判断是否启用云存储
+function isCloudStorageEnabled() {
+    // 如果URL参数强制本地模式，直接返回false
+    if (forceLocalOnly) return false;
+    
+    // 从本地存储读取用户设置
+    return localStorage.getItem('easy_note_cloud_sync') === 'true';
+}

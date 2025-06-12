@@ -269,12 +269,15 @@
             // Register service worker for offline capability
             if ('serviceWorker' in navigator) {
                 window.addEventListener('load', () => {
-                    navigator.serviceWorker.register('/sw.js')
+                    // 获取当前路径，适应GitHub Pages部署位置
+                    const basePath = location.pathname.includes('/easy-note') ? '/easy-note/' : '/';
+                    navigator.serviceWorker.register(`${basePath}sw.js`)
                         .then(registration => {
                             console.log('Service Worker registered with scope:', registration.scope);
                         })
                         .catch(error => {
                             console.error('Service Worker registration failed:', error);
+                            // Service Worker失败不影响应用核心功能
                         });
                 });
             }
