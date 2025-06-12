@@ -1648,9 +1648,17 @@ function createFetchOptions(method, headers, body = null) {
     return options;
 }
 
-// 由于使用OAuth直接授权，不再需要代理
+// 使用代理解决CORS问题
 function getProxiedUrl(url) {
-    // 直接返回原始URL，不使用代理
+    // 检查是否是GitHub API URL
+    if (url.includes('api.github.com')) {
+        // 使用备用API代理
+        const proxyUrl = url.replace('https://api.github.com', 'https://gh-api.onrender.com/api/v3');
+        logInfo('API', `使用代理URL: ${proxyUrl.substring(0, 50)}...`);
+        return proxyUrl;
+    }
+    
+    // 非GitHub API URL直接返回
     logInfo('API', `直接访问: ${url}`);
     return url;
 }
