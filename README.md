@@ -20,7 +20,12 @@
 3. 分享按钮可获取笔记链接，可在任何设备上通过链接访问
 4. 加密按钮可为笔记添加密码保护
 5. 新建按钮可创建全新的笔记
-6. 界面右下角显示云同步状态，点击可尝试重新连接
+6. 界面右下角显示云同步状态，点击可配置存储选项
+
+### 快速参数
+
+- `?local=true` - 强制使用本地存储模式，不连接GitHub
+- `https://yourdomain.com/easy-note/?id=xxxxx` - 直接打开指定ID的笔记
 
 ## 技术栈
 
@@ -28,12 +33,22 @@
 - **UI框架**：Bootstrap 5
 - **加密**：CryptoJS (AES加密)
 - **本地存储**：浏览器LocalStorage
-- **云存储**：JSONBin.io API
+- **云存储**：GitHub Gist API
+- **授权方式**：GitHub OAuth
+
+## 本地开发
+
+查看 [LOCAL-DEV-GUIDE.md](LOCAL-DEV-GUIDE.md) 获取本地开发指南。
+
+## 配置GitHub OAuth
+
+为了启用云同步功能，您需要配置GitHub OAuth。详细步骤请参阅 [OAUTH-SETUP.md](OAUTH-SETUP.md)。
 
 ## 部署方法
 
 1. 克隆此仓库
-2. 将所有文件上传到任意静态网页托管服务
+2. 配置GitHub OAuth应用（见上）
+3. 将所有文件上传到任意静态网页托管服务
    - GitHub Pages
    - Netlify
    - Vercel
@@ -52,5 +67,4 @@
 - [ ] 添加Markdown支持
 - [ ] 支持图片插入
 - [ ] 笔记过期时间设置
-- [ ] 支持更多云存储服务
 - [ ] 移动应用开发 
