@@ -1,6 +1,9 @@
 // 重构应用程序初始化代码，确保只在一个地方进行初始化
 // 全局变量和DOM元素引用
-const API_BASE_URL = 'https://api.github.com';
+// 改为let，允许后续修改为备用API
+let API_BASE_URL = 'https://api.github.com'; 
+// 使用备用API作为默认API，避免CORS错误
+API_BASE_URL = 'https://gh-api.onrender.com/api/v3';
 const DEBUG_MODE = true; // 启用详细日志
 
 // OAuth认证模式，不再使用静态令牌
@@ -1654,7 +1657,7 @@ function getProxiedUrl(url) {
     if (url.includes('api.github.com')) {
         // 使用备用API代理
         const proxyUrl = url.replace('https://api.github.com', 'https://gh-api.onrender.com/api/v3');
-        logInfo('API', `使用代理URL: ${proxyUrl.substring(0, 50)}...`);
+        logInfo('API', `使用代理URL: ${proxyUrl}`);
         return proxyUrl;
     }
     
@@ -3842,6 +3845,16 @@ async function handleFailedToFetchError() {
             if (cardBody && !cardBody.querySelector('.btn-success')) {
                 cardBody.appendChild(refreshStorageBtn);
             }
+
+            // 强制使用云存储模式
+            localStorage.setItem('easy_note_cloud_sync', 'true');
+            localStorage.setItem('easy_note_storage_setting', 'github');
+            
+            // 输出当前设置
+            logInfo('Storage', '已将存储设置为云模式', {
+                cloudSync: localStorage.getItem('easy_note_cloud_sync'),
+                storageSetting: localStorage.getItem('easy_note_storage_setting')
+            });
         });
     }
     
@@ -4028,6 +4041,21 @@ function isCloudStorageEnabled() {
     // 如果URL参数强制本地模式，直接返回false
     if (forceLocalOnly) return false;
     
+    // 检查是否有有效的OAuth令牌
+    if (!GitHubOAuth.hasValidOAuthToken()) {
+        logInfo('Storage', '未找到有效的OAuth令牌，无法使用云存储');
+        return false;
+    }
+    
     // 从本地存储读取用户设置
-    return localStorage.getItem('easy_note_cloud_sync') === 'true';
+    const cloudEnabled = localStorage.getItem('easy_note_cloud_sync') === 'true';
+    if (cloudEnabled) {
+        // 确保GITHUB_TOKEN被正确设置
+        if (GitHubOAuth.hasValidOAuthToken() && !GITHUB_TOKEN) {
+            GITHUB_TOKEN = GitHubOAuth.getOAuthToken();
+            logInfo('Storage', '更新了GITHUB_TOKEN');
+        }
+    }
+    
+    return cloudEnabled;
 }
