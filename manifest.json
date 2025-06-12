@@ -1,0 +1,21 @@
+{
+  "name": "Easy Note - 简易在线记事本",
+  "short_name": "Easy Note",
+  "description": "一个简单、安全的在线记事本应用，无需登录即可使用，支持笔记加密和多设备访问",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8f9fa",
+  "theme_color": "#0d6efd",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+} 
