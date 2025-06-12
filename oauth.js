@@ -1,5 +1,5 @@
 // GitHub OAuth认证处理模块
-const OAUTH_CLIENT_ID = ''; // 用户需要设置自己的GitHub OAuth应用Client ID
+const OAUTH_CLIENT_ID = 'Iv23liDeLHkmwxBvkX1m'; // 用户需要设置自己的GitHub OAuth应用Client ID
 const REDIRECT_URI = window.location.origin + window.location.pathname;
 const OAUTH_SCOPE = 'gist';
 const STORAGE_KEY_TOKEN = 'easy_note_oauth_token';
@@ -82,8 +82,8 @@ async function handleOAuthCallback() {
         
         // 使用代理服务交换令牌
         // 注意：由于GitHub OAuth不允许前端直接交换令牌，我们需要使用后端代理
-        // 这里默认使用一个通用的演示代理服务，实际使用时应替换为自己的服务
-        const tokenUrl = `https://github-oauth-proxy.vercel.app/api/github-oauth?code=${code}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
+        // 这里使用我们在本仓库中部署的Netlify Functions
+        const tokenUrl = `/.netlify/functions/github-oauth?code=${code}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
         
         const response = await fetch(tokenUrl);
         if (!response.ok) {
