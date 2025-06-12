@@ -151,16 +151,23 @@
                     </div>
                     <div class="modal-body">
                         <div class="form-check mb-3">
-                            <input class="form-check-input" type="radio" name="storageOption" id="useGitHub" value="github" checked>
-                            <label class="form-check-label" for="useGitHub">
-                                使用GitHub Gist存储 (默认)
+                            <input class="form-check-input" type="radio" name="storageOption" id="useFirebase" value="firebase" checked>
+                            <label class="form-check-label" for="useFirebase">
+                                <i class="bi bi-cloud"></i> 使用Firebase存储 <span class="badge bg-success">推荐</span>
                             </label>
-                            <div class="form-text">使用GitHub Gist提供更好的跨设备访问体验</div>
+                            <div class="form-text">使用Firebase提供稳定可靠的跨设备访问体验</div>
+                        </div>
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="radio" name="storageOption" id="useGitHub" value="github">
+                            <label class="form-check-label" for="useGitHub">
+                                <i class="bi bi-github"></i> 使用GitHub Gist存储
+                            </label>
+                            <div class="form-text">使用GitHub Gist提供跨设备访问体验（可能不稳定）</div>
                         </div>
                         <div class="form-check mb-3">
                             <input class="form-check-input" type="radio" name="storageOption" id="useLocalOnly" value="local">
                             <label class="form-check-label" for="useLocalOnly">
-                                仅使用本地存储 (不同步到云端)
+                                <i class="bi bi-hdd"></i> 仅使用本地存储 (不同步到云端)
                             </label>
                             <div class="form-text">笔记只会保存在当前设备上，无法在其他设备访问</div>
                         </div>
@@ -353,8 +360,17 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/crypto-js@4.1.1/crypto-js.min.js"></script>
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    
+    <!-- 应用脚本 -->
     <script src="oauth.js"></script>
     <script src="cloud-storage.js"></script>
+    <script src="firebase-storage.js"></script>
+    <script src="firebase-integration.js"></script>
     <script src="app.js"></script>
 </body>
 </html> 
