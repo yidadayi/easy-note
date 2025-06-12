@@ -1,6 +1,7 @@
 // GitHub OAuth认证处理模块
 const OAUTH_CLIENT_ID = 'Iv23liDeLHkmwxBvkX1m'; // 用户需要设置自己的GitHub OAuth应用Client ID
-const REDIRECT_URI = window.location.origin + window.location.pathname;
+// 只使用基础URL作为重定向URI，忽略任何查询参数
+const REDIRECT_URI = window.location.origin + window.location.pathname; // 例如 https://bespoke-biscuit-d9ca19.netlify.app
 const OAUTH_SCOPE = 'gist';
 const STORAGE_KEY_TOKEN = 'easy_note_oauth_token';
 const STORAGE_KEY_STATE = 'easy_note_oauth_state';
@@ -17,6 +18,13 @@ function initiateOAuthFlow() {
         alert('错误: 尚未配置GitHub OAuth应用。请参照OAUTH-SETUP.md文件设置您的OAuth应用，并在oauth.js中更新OAUTH_CLIENT_ID。');
         console.error('OAuth配置错误: 未设置OAUTH_CLIENT_ID');
         return;
+    }
+    
+    // 保存当前笔记ID以便授权后返回
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentNoteId = urlParams.get('id');
+    if (currentNoteId) {
+        localStorage.setItem('easy_note_current_id', currentNoteId);
     }
     
     // 生成并保存状态值
@@ -99,9 +107,14 @@ async function handleOAuthCallback() {
         // 保存令牌
         localStorage.setItem(STORAGE_KEY_TOKEN, data.access_token);
         
-        // 清除URL参数
-        const cleanUrl = window.location.origin + window.location.pathname;
-        window.history.replaceState({}, document.title, cleanUrl);
+        // 恢复之前的笔记ID（如果有）
+        const savedNoteId = localStorage.getItem('easy_note_current_id');
+        let targetUrl = window.location.origin + window.location.pathname;
+        if (savedNoteId) {
+            targetUrl += `?id=${savedNoteId}`;
+            localStorage.removeItem('easy_note_current_id'); // 使用后清除
+        }
+        window.history.replaceState({}, document.title, targetUrl);
         
         return data.access_token;
     } catch (error) {
