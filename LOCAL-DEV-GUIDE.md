@@ -91,3 +91,15 @@ const tokenUrl = `https://github-oauth-proxy.vercel.app/api/github-oauth?code=${
 3. **其他设备无法访问**
    - 检查防火墙设置
    - 确保所有设备在同一局域网内 
+
+## 5. 启用云同步模式
+
+在localStorage中设置云同步启用：
+```javascript
+localStorage.setItem('easy_note_cloud_sync', 'true');
+```
+
+请按照以下步骤操作：
+1. 点击右上角的同步状态图标
+2. 在弹出的对话框中选择"**使用GitHub Gist存储 (默认)**"选项
+3. 点击"保存设置"按钮 

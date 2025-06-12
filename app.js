@@ -642,8 +642,8 @@ function copyToClipboard(text) {
 // 处理同步状态点击
 function handleSyncStatusClick() {
     try {
-        logInfo('Event', '点击了同步状态');
-        
+    logInfo('Event', '点击了同步状态');
+    
         // 检查是否有设置模态框
         if (!settingsModal) {
             logError('Event', '设置模态框不存在');
@@ -674,7 +674,7 @@ function handleSyncStatusClick() {
                     
                     // 显示设置模态框
                     settingsModal.show();
-                } else {
+        } else {
                     // 连接有问题，显示错误信息
                     const errorDetails = `
                         <div class="alert alert-danger">
@@ -733,7 +733,7 @@ function handleSyncStatusClick() {
                     settingsModal.show();
                 }
             });
-        } else {
+    } else {
             // 云同步未启用或未连接，显示设置选项
             logInfo('Event', '云同步未启用，显示设置选项');
             
@@ -2104,21 +2104,21 @@ async function createNewNote() {
         const noteId = generateUniqueId();
         
         // 创建笔记数据
-        const noteData = {
-            content: '',
-            lastSaved: new Date().toISOString(),
-            encrypted: false
-        };
+            const noteData = {
+                content: '',
+                lastSaved: new Date().toISOString(),
+                encrypted: false
+            };
         
         // 设置当前笔记ID
         currentNoteId = noteId;
-        updateURL();
-        updateNoteIdDisplay();
+                updateURL();
+                updateNoteIdDisplay();
         
         // 清除编辑器内容
         if (noteContent) {
-            noteContent.value = '';
-            noteContent.removeAttribute('disabled');
+                noteContent.value = '';
+                noteContent.removeAttribute('disabled');
         }
         
         // 重置加密状态
@@ -2130,10 +2130,10 @@ async function createNewNote() {
         
         // 输出调试信息
         logInfo('Create', `创建新笔记: ${noteId}`);
-        
-        // 保存到本地存储
+                
+                // 保存到本地存储
         const localKey = `note_${noteId}`;
-        localStorage.setItem(localKey, JSON.stringify(noteData));
+                localStorage.setItem(localKey, JSON.stringify(noteData));
         
         // 更新上次保存时间
         lastSaved = new Date();
@@ -2154,8 +2154,8 @@ async function createNewNote() {
                         localStorage.removeItem(`note_${noteId}`);
                         // 更新当前ID
                         currentNoteId = result.noteId;
-                        updateURL();
-                        updateNoteIdDisplay();
+            updateURL();
+            updateNoteIdDisplay();
                     }
                     logInfo('Create', '笔记保存到云端成功');
                 } else {
@@ -2164,9 +2164,9 @@ async function createNewNote() {
             } catch (error) {
                 logError('Create', '创建笔记时出错', error);
                 showError('创建笔记时出错，已切换到本地模式', error.message);
-            }
-        } else {
-            logInfo('Create', '本地模式，创建本地笔记');
+        }
+    } else {
+        logInfo('Create', '本地模式，创建本地笔记');
         }
         
         return noteId;
@@ -2263,10 +2263,10 @@ function init() {
             // 如果URL中有笔记ID，加载该笔记
             logInfo('Init', `正在加载笔记: ${noteId}`);
             loadNote(noteId);
-        } else {
+                        } else {
             // 如果URL中没有笔记ID，创建新笔记
             logInfo('Init', '未指定笔记ID，创建新笔记');
-            createNewNote();
+                    createNewNote();
         }
         
         // 更新同步状态显示
@@ -2383,7 +2383,7 @@ function populateSettingsModal() {
                     });
                 }
             }, 100);
-        } else {
+    } else {
             // 未授权，显示GitHub授权选项
             cloudStatusDetails.innerHTML = `
                 <div class="alert alert-info">
