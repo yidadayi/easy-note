@@ -1,17 +1,16 @@
 // 重构应用程序初始化代码，确保只在一个地方进行初始化
 // 全局变量和DOM元素引用
-let API_BASE_URL = 'https://api.github.com';
-// 添加CORS代理URL选项
-const CORS_PROXY_URL = 'https://api.allorigins.win/raw?url=';
-let USE_CORS_PROXY = true; // 默认使用CORS代理
+const API_BASE_URL = 'https://api.github.com';
 const DEBUG_MODE = true; // 启用详细日志
-let GITHUB_TOKEN = localStorage.getItem('easy_note_github_token') || null;
 
-// 检查是否使用备用API
-if (localStorage.getItem('easy_note_alt_api') === 'true') {
-    // 这是一个GitHub API的替代端点
-    API_BASE_URL = 'https://gh-api.onrender.com/api/v3';
-    console.log('使用备用API端点:', API_BASE_URL);
+// OAuth认证模式，不再使用静态令牌
+// GITHUB_TOKEN 变量仍保留用于兼容，但其值来自OAuth
+let GITHUB_TOKEN = null; 
+
+// 检查OAuth认证状态，更新令牌
+if (GitHubOAuth.hasValidOAuthToken()) {
+    GITHUB_TOKEN = GitHubOAuth.getOAuthToken();
+    logInfo('Auth', '从OAuth获取到有效令牌');
 }
 
 // 创建GitHub API授权头部函数
@@ -20,19 +19,18 @@ function getAuthHeaders(includeContentType = false) {
         'Accept': 'application/vnd.github.v3+json'
     };
     
+    // 尝试获取最新的OAuth令牌
+    if (GitHubOAuth.hasValidOAuthToken()) {
+        GITHUB_TOKEN = GitHubOAuth.getOAuthToken();
+    }
+    
     if (!GITHUB_TOKEN) {
-        console.error('尝试创建授权头部但GitHub令牌未设置');
+        console.error('尝试创建授权头部但OAuth令牌未设置');
         return headers;
     }
     
-    // 根据令牌类型使用不同的前缀
-    if (GITHUB_TOKEN.startsWith('github_pat_')) {
-        headers['Authorization'] = `Bearer ${GITHUB_TOKEN}`;
-    } else if (GITHUB_TOKEN.startsWith('ghp_')) {
-        headers['Authorization'] = `token ${GITHUB_TOKEN}`;
-    } else {
-        headers['Authorization'] = `token ${GITHUB_TOKEN}`;
-    }
+    // OAuth令牌统一使用Bearer前缀
+    headers['Authorization'] = `Bearer ${GITHUB_TOKEN}`;
     
     if (includeContentType) {
         headers['Content-Type'] = 'application/json';
@@ -538,13 +536,8 @@ function setupEventListeners() {
             logWarning('Init', 'GitHub令牌保存按钮不存在');
         }
 
-        // 令牌诊断按钮
-        if (tokenDebugBtn) {
-            tokenDebugBtn.addEventListener('click', async function() {
-                logInfo('Event', '点击了令牌诊断按钮');
-                handleTokenDebug();
-            });
-        }
+        // OAuth模式不再需要令牌诊断按钮
+        // 此处移除了tokenDebugBtn相关代码
 
         // 笔记ID复制功能
         if (noteIdDisplay) {
@@ -636,17 +629,21 @@ function copyToClipboard(text) {
 
 // 处理同步状态点击
 function handleSyncStatusClick() {
+    logInfo('Event', '点击了同步状态');
+    
     if (!forceLocalOnly) {
-        if (!GITHUB_TOKEN) {
-            // 显示GitHub令牌设置模态框
+        // 检查是否已通过OAuth授权
+        if (!GitHubOAuth.hasValidOAuthToken()) {
+            // 显示GitHub授权模态框
             const githubTokenModal = document.getElementById('githubTokenModal');
             if (githubTokenModal) {
                 const modal = new bootstrap.Modal(githubTokenModal);
                 modal.show();
             }
         } else if (!isCloudSyncEnabled) {
+            // 已授权但未启用云同步
             checkCloudConnectivity();
-            alert('正在尝试重新连接GitHub...');
+            showDebugAlert('正在尝试重新连接GitHub...');
         } else {
             // 如果已连接，点击显示存储选项模态框
             if (storageOptionsModal) storageOptionsModal.show();
@@ -680,20 +677,23 @@ function handleSaveStorageOptions() {
             forceLocalOnly = false;
             localStorage.setItem('easy_note_storage_setting', 'github');
             
-            // 如果选择GitHub但没有令牌，显示令牌设置模态框
-            if (!GITHUB_TOKEN) {
+            // 如果选择GitHub但没有OAuth授权，显示授权模态框
+            if (!GitHubOAuth.hasValidOAuthToken()) {
                 const githubTokenModal = document.getElementById('githubTokenModal');
                 if (githubTokenModal) {
                     const modal = new bootstrap.Modal(githubTokenModal);
                     setTimeout(() => {
                         modal.show();
                     }, 500);
-                    logInfo('Storage', '未设置GitHub令牌，显示令牌设置对话框');
+                    logInfo('Storage', '未通过GitHub OAuth授权，显示授权对话框');
                 } else {
-                    logError('Storage', '找不到GitHub令牌模态框');
-                    alert('无法显示GitHub令牌设置界面，请刷新页面重试');
+                    logError('Storage', '找不到GitHub授权模态框');
+                    alert('无法显示GitHub授权界面，请刷新页面重试');
                 }
             } else {
+                // 使用最新的OAuth令牌
+                GITHUB_TOKEN = GitHubOAuth.getOAuthToken();
+                
                 // 重新检查云连接
                 logInfo('Storage', '正在检查GitHub连接...');
                 checkCloudConnectivity();
@@ -723,50 +723,21 @@ function handleSaveStorageOptions() {
     }
 }
 
-// 处理保存GitHub令牌
+// 处理GitHub授权
 function handleSaveGithubToken() {
-    const tokenInput = document.getElementById('githubToken');
+    logInfo('Event', '点击了GitHub授权按钮');
     
-    if (tokenInput) {
-        let token = tokenInput.value.trim();
-        
-        if (token) {
-            // 处理令牌格式，移除可能的引号或空格
-            token = token.replace(/['"]/g, '').trim();
-            
-            logInfo('Token', `准备验证令牌 (${maskToken(token)})`);
-            
-            // 先进行验证
-            validateGithubToken(token)
-                .then(valid => {
-                    if (valid) {
-                        // 验证成功，保存令牌
-                        localStorage.setItem('easy_note_github_token', token);
-                        GITHUB_TOKEN = token;
-                        
-                        // 隐藏模态框
-                        const githubTokenModal = document.getElementById('githubTokenModal');
-                        if (githubTokenModal) {
-                            bootstrap.Modal.getInstance(githubTokenModal).hide();
-                        }
-                        
-                        // 检查连接
-                        checkCloudConnectivity();
-                        
-                        showDebugAlert('GitHub令牌已保存并验证成功。正在尝试连接...');
-                    } else {
-                        // 验证失败
-                        showError('GitHub令牌验证失败，请检查是否有正确的gist权限');
-                    }
-                })
-                .catch(error => {
-                    logError('Token', '验证GitHub令牌时出错', error);
-                    showError('验证GitHub令牌时出错', error.message);
-                });
-        } else {
-            alert('请输入有效的GitHub令牌');
-        }
+    // 隐藏模态框
+    const githubTokenModal = document.getElementById('githubTokenModal');
+    if (githubTokenModal) {
+        bootstrap.Modal.getInstance(githubTokenModal).hide();
     }
+    
+    // 启动GitHub OAuth授权流程
+    showDebugAlert('正在跳转到GitHub授权页面...');
+    setTimeout(() => {
+        GitHubOAuth.initiateOAuthFlow();
+    }, 500);
 }
 
 // 处理令牌诊断
@@ -1677,23 +1648,11 @@ function createFetchOptions(method, headers, body = null) {
     return options;
 }
 
-// 使用CORS代理处理URL
+// 由于使用OAuth直接授权，不再需要代理
 function getProxiedUrl(url) {
-    // 如果已经关闭了CORS代理，直接返回
-    if (!USE_CORS_PROXY) {
-        logInfo('API', `不使用代理，直接访问: ${url}`);
-        return url;
-    }
-    
-    // 如果不是GitHub API URL，直接返回
-    if (!url.includes('api.github.com') && !url.includes('gh-api.onrender.com')) {
-        return url;
-    }
-    
-    // 对URL进行编码并添加代理前缀
-    const proxiedUrl = `${CORS_PROXY_URL}${encodeURIComponent(url)}`;
-    logInfo('API', `使用代理URL: ${proxiedUrl.substring(0, 50)}...`);
-    return proxiedUrl;
+    // 直接返回原始URL，不使用代理
+    logInfo('API', `直接访问: ${url}`);
+    return url;
 }
 
 // 修改fetchNoteFromCloud使用新的fetch选项
@@ -2228,6 +2187,9 @@ function init() {
     try {
         logInfo('Init', '开始初始化应用...');
         
+        // 首先处理OAuth回调，如果有的话
+        handleOAuthProcess();
+        
         // 从URL参数中读取设置
         const urlParams = new URLSearchParams(window.location.search);
         const localParam = urlParams.get('local');
@@ -2244,11 +2206,24 @@ function init() {
             document.body.appendChild(mobileTestIndicator);
         }
 
-        // 从URL参数读取direct=true，强制直连GitHub API
-        const directParam = urlParams.get('direct');
-        if (directParam === 'true') {
-            USE_CORS_PROXY = false;
-            logInfo('Init', '通过URL参数强制直连GitHub API (不使用代理)');
+        // OAuth模式不再需要代理设置，忽略direct参数
+        
+        // 处理OAuth回调和初始化过程
+        async function handleOAuthProcess() {
+            try {
+                // 检查是否是OAuth回调
+                const token = await GitHubOAuth.handleOAuthCallback();
+                if (token) {
+                    logInfo('Auth', 'OAuth认证成功，已获取令牌');
+                    GITHUB_TOKEN = token;
+                    localStorage.setItem('easy_note_auth_status', 'oauth_success');
+                    
+                    // 显示成功消息
+                    showDebugAlert('GitHub授权成功！');
+                }
+            } catch (error) {
+                logError('Auth', 'OAuth处理过程中出错', error);
+            }
         }
         
         // 从本地存储读取设置
@@ -4007,7 +3982,7 @@ function populateSettingsModal() {
     }
 }
 
-// 修改updateCloudStatusDisplay，移除JSONBin相关代码
+// 更新云状态显示
 function updateCloudStatusDisplay() {
     const indicator = document.getElementById('cloudStatusIndicator');
     const tooltip = document.getElementById('cloudStatusTooltip');
@@ -4019,12 +3994,16 @@ function updateCloudStatusDisplay() {
         return;
     }
     
-    if (!GITHUB_TOKEN) {
-        // 未设置GitHub令牌
+    // 检查OAuth授权状态
+    if (!GitHubOAuth.hasValidOAuthToken()) {
+        // 未授权
         indicator.className = 'status-indicator disconnected';
-        tooltip.textContent = '未连接到GitHub (未设置令牌)';
+        tooltip.textContent = '未连接到GitHub (需要授权)';
         return;
     }
+    
+    // 更新GITHUB_TOKEN以确保使用最新的OAuth令牌
+    GITHUB_TOKEN = GitHubOAuth.getOAuthToken();
     
     // 默认为"正在检查连接..."状态
     indicator.className = 'status-indicator checking';
