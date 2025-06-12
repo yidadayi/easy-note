@@ -1,12 +1,11 @@
 // 重构应用程序初始化代码，确保只在一个地方进行初始化
 // 全局变量和DOM元素引用
 let API_BASE_URL = 'https://api.github.com';
+// 添加CORS代理URL选项
+const CORS_PROXY_URL = 'https://corsproxy.io/?';
+let USE_CORS_PROXY = true; // 默认使用CORS代理
 const DEBUG_MODE = true; // 启用详细日志
 let GITHUB_TOKEN = localStorage.getItem('easy_note_github_token') || null;
-// JSONBin.io API密钥，用于本地测试
-const JSONBIN_API_KEY = '$2a$10$mxS8DhaxXKm09ADUNi/a2OyLTI4OdHC2YTu4iVRgLxITyHMPM1YuG';
-const JSONBIN_URL = 'https://api.jsonbin.io/v3/b';
-let USE_JSONBIN = localStorage.getItem('easy_note_use_jsonbin') === 'true';
 
 // 检查是否使用备用API
 if (localStorage.getItem('easy_note_alt_api') === 'true') {
@@ -46,19 +45,7 @@ function getAuthHeaders(includeContentType = false) {
     return headers;
 }
 
-// 创建JSONBin.io API头部函数
-function getJSONBinHeaders(includeContentType = true) {
-    const headers = {
-        'X-Master-Key': JSONBIN_API_KEY,
-        'X-Access-Key': JSONBIN_API_KEY
-    };
-    
-    if (includeContentType) {
-        headers['Content-Type'] = 'application/json';
-    }
-    
-    return headers;
-}
+// 删除JSONBin相关函数
 
 let isEncrypted = false;
 let lastSaved = null;
@@ -70,8 +57,7 @@ let noteContent, newNoteBtn, shareBtn, lockBtn, lastSavedEl, syncStatusEl, noteS
     shareModal, passwordModal, unlockModal, savePasswordBtn, unlockNoteBtn, copyLinkBtn,
     storageOptionsModal;
 
-// 在全局变量部分添加DOM元素引用
-let useGithubStorageRadio, useJsonbinStorageRadio;
+// 删除不需要的DOM元素引用
 
 // 日志函数
 function logInfo(category, message, data) {
@@ -1676,6 +1662,17 @@ function createFetchOptions(method, headers, body = null) {
     return options;
 }
 
+// 使用CORS代理处理URL
+function getProxiedUrl(url) {
+    // 如果不是GitHub API URL或已经关闭了CORS代理，直接返回
+    if (!USE_CORS_PROXY || (!url.includes('api.github.com') && !url.includes('gh-api.onrender.com'))) {
+        return url;
+    }
+    
+    // 对URL进行编码并添加代理前缀
+    return `${CORS_PROXY_URL}${encodeURIComponent(url)}`;
+}
+
 // 修改fetchNoteFromCloud使用新的fetch选项
 async function fetchNoteFromCloud(noteId) {
     try {
@@ -1684,11 +1681,6 @@ async function fetchNoteFromCloud(noteId) {
         if (!noteId || typeof noteId !== 'string' || noteId.length < 5) {
             logError('Fetch', `无效的笔记ID: ${noteId}`);
             return null;
-        }
-        
-        // 如果已经设置使用JSONBin，直接从JSONBin获取
-        if (USE_JSONBIN) {
-            return await fetchNoteFromJSONBin(noteId);
         }
         
         if (!GITHUB_TOKEN) {
@@ -1707,30 +1699,29 @@ async function fetchNoteFromCloud(noteId) {
         
         try {
             const options = createFetchOptions('GET', headers);
-            const response = await fetch(apiUrl, options);
+            // 使用代理URL
+            const proxiedUrl = getProxiedUrl(apiUrl);
+            logInfo('API', `使用代理URL: ${proxiedUrl.substring(0, 50)}...`);
+            const response = await fetch(proxiedUrl, options);
             
             logInfo('Fetch', `收到响应: ${response.status} ${response.statusText}`);
             
             if (response.status === 404) {
                 logError('Fetch', `笔记未找到: ${noteId}`);
-                // 在GitHub找不到，尝试从JSONBin获取
-                logInfo('Fetch', '在GitHub中未找到笔记，尝试从JSONBin获取');
-                return await fetchNoteFromJSONBin(noteId);
+                showError('笔记未找到', '请检查笔记ID是否正确');
+                return null;
             }
             
             if (response.status === 403) {
                 logError('Fetch', `无权限访问笔记: ${noteId}`);
                 handleGitHubPermissionIssue('GitHub令牌权限不足，无法读取笔记');
-                // 权限问题，尝试从JSONBin获取
-                logInfo('Fetch', 'GitHub权限问题，尝试从JSONBin获取');
-                return await fetchNoteFromJSONBin(noteId);
+                return null;
             }
             
             if (!response.ok) {
                 logError('Fetch', `获取笔记失败: ${response.status} ${response.statusText}`);
-                // API错误，尝试从JSONBin获取
-                logInfo('Fetch', 'GitHub API错误，尝试从JSONBin获取');
-                return await fetchNoteFromJSONBin(noteId);
+                showError('获取笔记失败', `HTTP错误: ${response.status} ${response.statusText}`);
+                return null;
             }
             
             const data = await response.json();
@@ -1745,15 +1736,13 @@ async function fetchNoteFromCloud(noteId) {
                     return parsedNote;
                 } catch (parseError) {
                     logError('Fetch', '解析笔记JSON数据失败', parseError);
-                    // 解析错误，尝试从JSONBin获取
-                    logInfo('Fetch', 'GitHub数据解析错误，尝试从JSONBin获取');
-                    return await fetchNoteFromJSONBin(noteId);
+                    showError('笔记数据格式错误', '无法解析笔记内容');
+                    return null;
                 }
             } else {
                 logError('Fetch', 'Gist中未找到note.json文件', data.files);
-                // 格式错误，尝试从JSONBin获取
-                logInfo('Fetch', 'GitHub数据格式不正确，尝试从JSONBin获取');
-                return await fetchNoteFromJSONBin(noteId);
+                showError('笔记格式不正确', '可能不是由Easy Note创建的Gist');
+                return null;
             }
         } catch (fetchError) {
             // 处理网络错误，特别是CORS和网络连接问题
@@ -1778,7 +1767,9 @@ async function fetchNoteFromCloud(noteId) {
                         logInfo('API', `使用备用API重试: GET ${backupApiUrl}`);
                         
                         const backupOptions = createFetchOptions('GET', headers);
-                        const backupResponse = await fetch(backupApiUrl, backupOptions);
+                        const proxiedBackupUrl = getProxiedUrl(backupApiUrl);
+                        logInfo('API', `使用代理URL: ${proxiedBackupUrl.substring(0, 50)}...`);
+                        const backupResponse = await fetch(proxiedBackupUrl, backupOptions);
                         
                         if (backupResponse.ok) {
                             const backupData = await backupResponse.json();
@@ -1794,115 +1785,47 @@ async function fetchNoteFromCloud(noteId) {
                                     return parsedNote;
                                 } catch (parseError) {
                                     logError('Fetch', '解析笔记JSON数据失败', parseError);
-                                    // 解析错误，尝试从JSONBin获取
-                                    return await fetchNoteFromJSONBin(noteId);
+                                    showError('笔记数据格式错误', '无法解析笔记内容');
+                                    return null;
                                 }
                             } else {
-                                // 格式错误，尝试从JSONBin获取
-                                return await fetchNoteFromJSONBin(noteId);
+                                logError('Fetch', 'Gist中未找到note.json文件', backupData.files);
+                                showError('笔记格式不正确', '可能不是由Easy Note创建的Gist');
+                                return null;
                             }
                         } else {
-                            // 备用API返回错误，尝试JSONBin
-                            logInfo('Fetch', '备用API也失败，尝试从JSONBin获取');
-                            localStorage.setItem('easy_note_use_jsonbin', 'true');
-                            USE_JSONBIN = true;
-                            return await fetchNoteFromJSONBin(noteId);
+                            logError('Fetch', `备用API请求失败: ${backupResponse.status}`);
+                            showError('网络错误', `无法连接到GitHub API (${backupResponse.status})`);
+                            return null;
                         }
                     } catch (backupError) {
                         logError('Fetch', '备用API请求也失败', backupError);
-                        // 备用API也失败，尝试JSONBin
-                        logInfo('Fetch', '备用API请求失败，尝试从JSONBin获取');
-                        localStorage.setItem('easy_note_use_jsonbin', 'true');
-                        USE_JSONBIN = true;
-                        showDebugAlert('自动切换到JSONBin存储，更适合本地测试');
-                        return await fetchNoteFromJSONBin(noteId);
+                        showError('网络错误', '无法连接到GitHub API，请检查网络连接或使用本地存储模式');
+                        return null;
                     }
                 } else {
-                    // 已经是备用API，还是失败，尝试JSONBin
-                    logInfo('Fetch', '备用API失败，尝试从JSONBin获取');
-                    localStorage.setItem('easy_note_use_jsonbin', 'true');
-                    USE_JSONBIN = true;
-                    showDebugAlert('自动切换到JSONBin存储，更适合本地测试');
-                    return await fetchNoteFromJSONBin(noteId);
+                    // 已经是备用API，还是失败
+                    showError('网络错误', 'CORS限制，无法连接到GitHub API，请使用本地存储模式');
+                    return null;
                 }
             } else {
-                // 其他网络错误，尝试JSONBin
-                logInfo('Fetch', '网络错误，尝试从JSONBin获取');
-                return await fetchNoteFromJSONBin(noteId);
+                // 其他网络错误
+                showError('网络错误', `无法获取笔记: ${fetchError.message}`);
+                return null;
             }
         }
     } catch (error) {
         logError('Fetch', '获取云端笔记时出错', error);
-        // 任何错误都尝试从JSONBin获取
-        logInfo('Fetch', '获取笔记出错，尝试从JSONBin获取');
-        try {
-            return await fetchNoteFromJSONBin(noteId);
-        } catch (jsonbinError) {
-            // JSONBin也失败，显示原始错误
-            showError('网络错误，无法获取笔记', error.message);
-            return null;
-        }
+        showError('出错了', `获取笔记失败: ${error.message}`);
+        return null;
     }
 }
 
-// 从JSONBin.io获取笔记的辅助函数
-async function fetchNoteFromJSONBin(noteId) {
-    try {
-        logInfo('JSONBin', `尝试从JSONBin获取笔记: ${noteId}`);
-        
-        if (!noteId || noteId.length < 5) {
-            logError('JSONBin', '无效的笔记ID');
-            return null;
-        }
-        
-        // 构建请求URL和选项
-        const url = `${JSONBIN_URL}/${noteId}`;
-        const options = {
-            method: 'GET',
-            headers: getJSONBinHeaders(false)
-        };
-        
-        logInfo('JSONBin', `发送请求: GET ${url}`);
-        
-        const response = await fetch(url, options);
-        
-        if (response.status === 404) {
-            logError('JSONBin', `笔记未找到: ${noteId}`);
-            return null;
-        }
-        
-        if (!response.ok) {
-            logError('JSONBin', `获取笔记失败: ${response.status}`);
-            return null;
-        }
-        
-        const data = await response.json();
-        logInfo('JSONBin', '从JSONBin获取笔记成功', data);
-        
-        // 提取笔记数据
-        if (data.record && data.record.noteData) {
-            const noteData = data.record.noteData;
-            logInfo('JSONBin', '笔记数据提取成功', noteData);
-            showDebugAlert('从JSONBin成功加载笔记');
-            return noteData;
-        } else {
-            logError('JSONBin', 'JSONBin数据格式不正确', data);
-            return null;
-        }
-    } catch (error) {
-        logError('JSONBin', '从JSONBin获取笔记失败', error);
-        throw error;
-    }
-}
+// 删除JSONBin相关函数
 
 // 修改saveNoteToCloud使用新的fetch选项
 async function saveNoteToCloud(noteId, noteData) {
     logInfo('Save', `准备保存笔记到云端: ${noteId}`, noteData);
-    
-    // 如果已经明确设置使用JSONBin，直接走JSONBin流程
-    if (USE_JSONBIN) {
-        return await saveNoteToJSONBin(noteId, noteData);
-    }
     
     if (!GITHUB_TOKEN) {
         logError('Save', 'GitHub令牌未设置，无法保存到云端');
@@ -1933,7 +1856,10 @@ async function saveNoteToCloud(noteId, noteData) {
                 let checkResponse;
                 
                 try {
-                    checkResponse = await fetch(checkUrl, checkOptions);
+                    // 使用代理URL
+                    const proxiedCheckUrl = getProxiedUrl(checkUrl);
+                    logInfo('API', `使用代理URL: ${proxiedCheckUrl.substring(0, 50)}...`);
+                    checkResponse = await fetch(proxiedCheckUrl, checkOptions);
                     logInfo('Save', `检查Gist存在性: ${checkResponse.status} ${checkResponse.statusText}`);
                 } catch (checkFetchError) {
                     // 处理CORS或网络错误
@@ -1952,23 +1878,19 @@ async function saveNoteToCloud(noteId, noteData) {
                             logInfo('API', `使用备用API重试: GET ${backupCheckUrl}`);
                             
                             try {
-                                checkResponse = await fetch(backupCheckUrl, checkOptions);
+                                const proxiedBackupUrl = getProxiedUrl(backupCheckUrl);
+                                logInfo('API', `使用代理URL: ${proxiedBackupUrl.substring(0, 50)}...`);
+                                checkResponse = await fetch(proxiedBackupUrl, checkOptions);
                                 showDebugAlert('已自动切换到备用API，连接成功');
                             } catch (backupCheckError) {
-                                // 备用API也失败，尝试使用JSONBin
-                                logInfo('Save', '备用API也失败，自动切换到JSONBin');
-                                localStorage.setItem('easy_note_use_jsonbin', 'true');
-                                USE_JSONBIN = true;
-                                showDebugAlert('自动切换到JSONBin存储，更适合本地测试');
-                                return await saveNoteToJSONBin(noteId, noteData);
+                                // 备用API也失败，直接抛出异常
+                                logError('Save', '备用API也失败', backupCheckError);
+                                throw new Error(`备用API请求也失败: ${backupCheckError.message}`);
                             }
                         } else {
-                            // 已经是备用API，还是失败，尝试JSONBin
-                            logInfo('Save', '备用API失败，自动切换到JSONBin');
-                            localStorage.setItem('easy_note_use_jsonbin', 'true');
-                            USE_JSONBIN = true;
-                            showDebugAlert('自动切换到JSONBin存储，更适合本地测试');
-                            return await saveNoteToJSONBin(noteId, noteData);
+                            // 已经是备用API，还是失败
+                            logError('Save', 'CORS限制，无法连接到GitHub API');
+                            throw new Error('CORS限制，无法连接到GitHub API');
                         }
                     } else {
                         throw checkFetchError;
@@ -1997,16 +1919,6 @@ async function saveNoteToCloud(noteId, noteData) {
                 }
             } catch (error) {
                 logError('Save', '检查Gist时出错', error);
-                
-                // 如果是网络相关错误，尝试使用JSONBin
-                if (error.message && (error.message.includes('Failed to fetch') || error.message.includes('CORS'))) {
-                    logInfo('Save', 'GitHub API连接失败，切换到JSONBin');
-                    localStorage.setItem('easy_note_use_jsonbin', 'true');
-                    USE_JSONBIN = true;
-                    showDebugAlert('自动切换到JSONBin存储，更适合本地测试');
-                    return await saveNoteToJSONBin(noteId, noteData);
-                }
-                
                 throw error;
             }
         } else {
@@ -2037,7 +1949,10 @@ async function saveNoteToCloud(noteId, noteData) {
         let response;
         
         try {
-            response = await fetch(url, options);
+            // 使用代理URL
+            const proxiedUrl = getProxiedUrl(url);
+            logInfo('API', `使用代理URL: ${proxiedUrl.substring(0, 50)}...`);
+            response = await fetch(proxiedUrl, options);
             logInfo('Save', `${action}笔记响应: ${response.status} ${response.statusText}`);
         } catch (saveFetchError) {
             // 处理CORS或网络错误
@@ -2058,23 +1973,15 @@ async function saveNoteToCloud(noteId, noteData) {
                     logInfo('API', `使用备用API重试: ${method} ${backupUrl}`);
                     
                     try {
-                        response = await fetch(backupUrl, options);
+                        const proxiedBackupUrl = getProxiedUrl(backupUrl);
+                        logInfo('API', `使用代理URL: ${proxiedBackupUrl.substring(0, 50)}...`);
+                        response = await fetch(proxiedBackupUrl, options);
                         showDebugAlert('已自动切换到备用API，保存成功');
                     } catch (backupSaveError) {
-                        // 备用API也失败，切换到JSONBin
-                        logInfo('Save', '备用API保存失败，切换到JSONBin');
-                        localStorage.setItem('easy_note_use_jsonbin', 'true');
-                        USE_JSONBIN = true;
-                        showDebugAlert('自动切换到JSONBin存储，更适合本地测试');
-                        return await saveNoteToJSONBin(noteId, noteData);
+                        throw new Error(`备用API保存也失败: ${backupSaveError.message}`);
                     }
                 } else {
-                    // 已经是备用API或非POST请求，尝试JSONBin
-                    logInfo('Save', 'GitHub API保存失败，切换到JSONBin');
-                    localStorage.setItem('easy_note_use_jsonbin', 'true');
-                    USE_JSONBIN = true;
-                    showDebugAlert('自动切换到JSONBin存储，更适合本地测试');
-                    return await saveNoteToJSONBin(noteId, noteData);
+                    throw new Error('由于CORS限制，无法保存到GitHub。请尝试使用备用API或检查网络连接。');
                 }
             } else {
                 throw saveFetchError;
@@ -2089,11 +1996,7 @@ async function saveNoteToCloud(noteId, noteData) {
                 handleGitHubPermissionIssue(`无法${action}Gist: HTTP 403`);
             }
             
-            // 如果GitHub API返回错误，尝试JSONBin
-            logInfo('Save', 'GitHub API请求失败，切换到JSONBin');
-            localStorage.setItem('easy_note_use_jsonbin', 'true');
-            USE_JSONBIN = true;
-            return await saveNoteToJSONBin(noteId, noteData);
+            throw new Error(`${action}笔记失败: HTTP ${response.status}`);
         }
         
         const result = await response.json();
@@ -2102,123 +2005,11 @@ async function saveNoteToCloud(noteId, noteData) {
         return result.id;
     } catch (error) {
         logError('Save', '保存笔记到云端时出错', error);
-        
-        // 任何保存错误都尝试使用JSONBin
-        try {
-            logInfo('Save', '保存出错，尝试使用JSONBin作为备选');
-            localStorage.setItem('easy_note_use_jsonbin', 'true');
-            USE_JSONBIN = true;
-            return await saveNoteToJSONBin(noteId, noteData);
-        } catch (jsonbinError) {
-            logError('Save', 'JSONBin保存也失败', jsonbinError);
-            throw error; // 仍然抛出原始错误
-        }
+        throw error;
     }
 }
 
-// 使用JSONBin.io保存笔记的辅助函数
-async function saveNoteToJSONBin(noteId, noteData) {
-    try {
-        logInfo('JSONBin', `准备使用JSONBin保存笔记: ${noteId}`);
-        
-        // 构建请求体
-        const binData = {
-            noteData: noteData,
-            metadata: {
-                appName: 'Easy Note',
-                version: '1.0',
-                timestamp: new Date().toISOString()
-            }
-        };
-        
-        // 如果笔记ID已存在，更新现有bin
-        if (noteId && noteId.length > 5) {
-            try {
-                // 在JSONBin中，我们使用bin ID作为笔记ID
-                // 先检查bin是否存在
-                const checkUrl = `${JSONBIN_URL}/${noteId}`;
-                const checkOptions = {
-                    method: 'GET',
-                    headers: getJSONBinHeaders(false)
-                };
-                
-                logInfo('JSONBin', `检查bin是否存在: GET ${checkUrl}`);
-                
-                try {
-                    const checkResponse = await fetch(checkUrl, checkOptions);
-                    
-                    if (checkResponse.ok) {
-                        // Bin存在，更新它
-                        const updateUrl = `${JSONBIN_URL}/${noteId}`;
-                        const updateOptions = {
-                            method: 'PUT',
-                            headers: getJSONBinHeaders(),
-                            body: JSON.stringify(binData)
-                        };
-                        
-                        logInfo('JSONBin', `更新bin: PUT ${updateUrl}`);
-                        
-                        const updateResponse = await fetch(updateUrl, updateOptions);
-                        
-                        if (updateResponse.ok) {
-                            const result = await updateResponse.json();
-                            logInfo('JSONBin', '更新bin成功', result);
-                            return noteId; // 返回原始ID
-                        } else {
-                            throw new Error(`更新bin失败: ${updateResponse.status}`);
-                        }
-                    } else if (checkResponse.status === 404) {
-                        // Bin不存在，创建新的
-                        // 继续执行创建流程
-                        logInfo('JSONBin', 'Bin不存在，将创建新的');
-                    } else {
-                        throw new Error(`检查bin出错: ${checkResponse.status}`);
-                    }
-                } catch (checkError) {
-                    if (checkError.message.includes('Failed to fetch')) {
-                        // 尝试创建新的bin
-                        logInfo('JSONBin', '检查bin时网络错误，尝试创建新的');
-                    } else {
-                        throw checkError;
-                    }
-                }
-            } catch (checkError) {
-                logError('JSONBin', '检查bin时出错', checkError);
-                // 出错时创建新的bin
-            }
-        }
-        
-        // 创建新的bin
-        const createUrl = JSONBIN_URL;
-        const createOptions = {
-            method: 'POST',
-            headers: getJSONBinHeaders(),
-            body: JSON.stringify(binData)
-        };
-        
-        logInfo('JSONBin', `创建新bin: POST ${createUrl}`);
-        
-        const createResponse = await fetch(createUrl, createOptions);
-        
-        if (createResponse.ok) {
-            const result = await createResponse.json();
-            const newBinId = result.metadata?.id || result.id;
-            
-            if (!newBinId) {
-                throw new Error('创建bin成功但未返回ID');
-            }
-            
-            logInfo('JSONBin', `创建bin成功，ID: ${newBinId}`);
-            return newBinId;
-        } else {
-            const errorText = await createResponse.text();
-            throw new Error(`创建bin失败: ${createResponse.status} - ${errorText}`);
-        }
-    } catch (error) {
-        logError('JSONBin', '保存到JSONBin失败', error);
-        throw new Error(`JSONBin保存失败: ${error.message}`);
-    }
-}
+// 删除JSONBin相关函数
 
 // 修改createNewNote使用新的fetch选项
 async function createNewNote() {
@@ -4168,99 +3959,9 @@ function populateSettingsModal() {
     } else {
         document.getElementById('currentNoteIdContainer').classList.add('d-none');
     }
-    
-    // 云服务供应商选项
-    if (!document.getElementById('storageProviderOptions')) {
-        // 只有在第一次加载时创建
-        const storageProviderContainer = document.createElement('div');
-        storageProviderContainer.className = 'mt-3 border p-3 rounded';
-        storageProviderContainer.id = 'storageProviderOptions';
-        
-        const storageProviderTitle = document.createElement('h6');
-        storageProviderTitle.textContent = '云服务供应商';
-        storageProviderContainer.appendChild(storageProviderTitle);
-        
-        const storageProviderForm = document.createElement('form');
-        
-        // GitHub Gist选项
-        const githubOption = document.createElement('div');
-        githubOption.className = 'form-check';
-        
-        useGithubStorageRadio = document.createElement('input');
-        useGithubStorageRadio.type = 'radio';
-        useGithubStorageRadio.className = 'form-check-input';
-        useGithubStorageRadio.name = 'storageProvider';
-        useGithubStorageRadio.id = 'useGithubStorage';
-        useGithubStorageRadio.checked = !USE_JSONBIN;
-        
-        const githubLabel = document.createElement('label');
-        githubLabel.className = 'form-check-label';
-        githubLabel.htmlFor = 'useGithubStorage';
-        githubLabel.textContent = 'GitHub Gist (推荐)';
-        
-        githubOption.appendChild(useGithubStorageRadio);
-        githubOption.appendChild(githubLabel);
-        storageProviderForm.appendChild(githubOption);
-        
-        // JSONBin选项
-        const jsonbinOption = document.createElement('div');
-        jsonbinOption.className = 'form-check';
-        
-        useJsonbinStorageRadio = document.createElement('input');
-        useJsonbinStorageRadio.type = 'radio';
-        useJsonbinStorageRadio.className = 'form-check-input';
-        useJsonbinStorageRadio.name = 'storageProvider';
-        useJsonbinStorageRadio.id = 'useJsonbinStorage';
-        useJsonbinStorageRadio.checked = USE_JSONBIN;
-        
-        const jsonbinLabel = document.createElement('label');
-        jsonbinLabel.className = 'form-check-label';
-        jsonbinLabel.htmlFor = 'useJsonbinStorage';
-        jsonbinLabel.textContent = 'JSONBin.io (适合本地测试)';
-        
-        jsonbinOption.appendChild(useJsonbinStorageRadio);
-        jsonbinOption.appendChild(jsonbinLabel);
-        storageProviderForm.appendChild(jsonbinOption);
-        
-        // 添加说明文本
-        const infoText = document.createElement('small');
-        infoText.className = 'text-muted mt-2 d-block';
-        infoText.textContent = '如果在本地测试遇到CORS错误，JSONBin.io是更好的选择。';
-        storageProviderForm.appendChild(infoText);
-        
-        // 添加事件处理
-        useGithubStorageRadio.addEventListener('change', function() {
-            if (this.checked) {
-                localStorage.setItem('easy_note_use_jsonbin', 'false');
-                USE_JSONBIN = false;
-                logInfo('Settings', '切换到GitHub Gist存储');
-                updateCloudStatusDisplay();
-            }
-        });
-        
-        useJsonbinStorageRadio.addEventListener('change', function() {
-            if (this.checked) {
-                localStorage.setItem('easy_note_use_jsonbin', 'true');
-                USE_JSONBIN = true;
-                logInfo('Settings', '切换到JSONBin.io存储');
-                updateCloudStatusDisplay();
-            }
-        });
-        
-        storageProviderContainer.appendChild(storageProviderForm);
-        
-        // 在已有内容后插入
-        const settingsContainer = document.querySelector('.modal-body');
-        const afterElement = document.querySelector('#currentNoteIdContainer').nextElementSibling;
-        settingsContainer.insertBefore(storageProviderContainer, afterElement);
-    } else {
-        // 如果已经创建过，只更新选中状态
-        useGithubStorageRadio.checked = !USE_JSONBIN;
-        useJsonbinStorageRadio.checked = USE_JSONBIN;
-    }
 }
 
-// 修改updateCloudStatusDisplay，增加服务提供商信息
+// 修改updateCloudStatusDisplay，移除JSONBin相关代码
 function updateCloudStatusDisplay() {
     const indicator = document.getElementById('cloudStatusIndicator');
     const tooltip = document.getElementById('cloudStatusTooltip');
@@ -4269,14 +3970,6 @@ function updateCloudStatusDisplay() {
         // 本地模式
         indicator.className = 'status-indicator local-mode';
         tooltip.textContent = '本地模式 (仅保存到本设备)';
-        return;
-    }
-    
-    // 检查GITHUB_TOKEN以及USE_JSONBIN的设置
-    if (USE_JSONBIN) {
-        // 使用JSONBin模式
-        indicator.className = 'status-indicator connected';
-        tooltip.textContent = '使用JSONBin.io存储 (适合本地测试)';
         return;
     }
     
