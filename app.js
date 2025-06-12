@@ -352,6 +352,15 @@ function initModals() {
             logWarning('Init', '找不到GitHub令牌模态框');
         }
         
+        // 初始化设置模态框
+        const settingsModalEl = document.getElementById('githubTokenModal'); // 重用GitHub令牌模态框作为设置模态框
+        if (settingsModalEl) {
+            settingsModal = new bootstrap.Modal(settingsModalEl);
+            logInfo('Init', '设置模态框初始化成功');
+        } else {
+            logWarning('Init', '找不到设置模态框');
+        }
+        
         // 初始化笔记解锁模态框
         const unlockModalEl = document.getElementById('unlockModal');
         if (unlockModalEl) {
