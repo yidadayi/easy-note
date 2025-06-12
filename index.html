@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <!-- CORS策略设置 -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://*.github.com https://*.githubusercontent.com https://*.github.io https://*.jsonbin.io https://cdn.shopimgs.com https://gh-api.onrender.com; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://*.github.com https://*.github.io https://*.jsonbin.io https://cdn.shopimgs.com https://gh-api.onrender.com;">
+    <!-- 更宽松的CSP策略 -->
+    <meta http-equiv="Content-Security-Policy" content="default-src * 'self' data: blob: 'unsafe-inline' 'unsafe-eval' https://* http://*;">
     <title>Easy Note - 简易在线记事本</title>
     <meta name="description" content="一个简单、安全的在线记事本应用，无需登录即可使用，支持笔记加密和多设备访问">
     <link rel="manifest" href="manifest.json">

@@ -2,7 +2,7 @@
 // 全局变量和DOM元素引用
 let API_BASE_URL = 'https://api.github.com';
 // 添加CORS代理URL选项
-const CORS_PROXY_URL = 'https://corsproxy.io/?';
+const CORS_PROXY_URL = 'https://api.allorigins.win/raw?url=';
 let USE_CORS_PROXY = true; // 默认使用CORS代理
 const DEBUG_MODE = true; // 启用详细日志
 let GITHUB_TOKEN = localStorage.getItem('easy_note_github_token') || null;
@@ -1664,13 +1664,21 @@ function createFetchOptions(method, headers, body = null) {
 
 // 使用CORS代理处理URL
 function getProxiedUrl(url) {
-    // 如果不是GitHub API URL或已经关闭了CORS代理，直接返回
-    if (!USE_CORS_PROXY || (!url.includes('api.github.com') && !url.includes('gh-api.onrender.com'))) {
+    // 如果已经关闭了CORS代理，直接返回
+    if (!USE_CORS_PROXY) {
+        logInfo('API', `不使用代理，直接访问: ${url}`);
+        return url;
+    }
+    
+    // 如果不是GitHub API URL，直接返回
+    if (!url.includes('api.github.com') && !url.includes('gh-api.onrender.com')) {
         return url;
     }
     
     // 对URL进行编码并添加代理前缀
-    return `${CORS_PROXY_URL}${encodeURIComponent(url)}`;
+    const proxiedUrl = `${CORS_PROXY_URL}${encodeURIComponent(url)}`;
+    logInfo('API', `使用代理URL: ${proxiedUrl.substring(0, 50)}...`);
+    return proxiedUrl;
 }
 
 // 修改fetchNoteFromCloud使用新的fetch选项
@@ -1701,7 +1709,6 @@ async function fetchNoteFromCloud(noteId) {
             const options = createFetchOptions('GET', headers);
             // 使用代理URL
             const proxiedUrl = getProxiedUrl(apiUrl);
-            logInfo('API', `使用代理URL: ${proxiedUrl.substring(0, 50)}...`);
             const response = await fetch(proxiedUrl, options);
             
             logInfo('Fetch', `收到响应: ${response.status} ${response.statusText}`);
@@ -2206,31 +2213,36 @@ function init() {
     try {
         logInfo('Init', '开始初始化应用...');
         
-        // 读取存储设置
+        // 从URL参数中读取设置
         const urlParams = new URLSearchParams(window.location.search);
-        const localModeParam = urlParams.get('local');
+        const localParam = urlParams.get('local');
         
-        // 如果URL参数中指定了local=true，强制使用本地模式
-        if (localModeParam === 'true') {
+        // 如果URL中包含local=true参数，强制使用本地模式
+        if (localParam === 'true') {
             forceLocalOnly = true;
-            isCloudSyncEnabled = false;
-            logInfo('Storage', '从URL参数检测到本地模式请求，启用仅本地模式（移动测试模式）');
-            localStorage.setItem('easy_note_storage_setting', 'local'); // 保存设置
-            // 立即更新UI状态为移动测试模式
-            updateSyncStatus(false);
-        } else {
-            // 否则读取本地存储中的设置
-            const storageSetting = localStorage.getItem('easy_note_storage_setting');
-            if (storageSetting === 'local') {
-                forceLocalOnly = true;
-                isCloudSyncEnabled = false;
-                logInfo('Storage', '从本地存储读取设置: 仅本地模式');
-            } else {
-                forceLocalOnly = false;
-                // 稍后会在checkCloudConnectivity中设置isCloudSyncEnabled
-                logInfo('Storage', '从本地存储读取设置: 云同步模式');
-            }
+            logInfo('Init', '通过URL参数强制使用本地模式');
+            
+            // 添加移动测试模式指示器
+            const mobileTestIndicator = document.createElement('div');
+            mobileTestIndicator.className = 'mobile-test-indicator';
+            mobileTestIndicator.textContent = '移动测试模式';
+            document.body.appendChild(mobileTestIndicator);
         }
+
+        // 从URL参数读取direct=true，强制直连GitHub API
+        const directParam = urlParams.get('direct');
+        if (directParam === 'true') {
+            USE_CORS_PROXY = false;
+            logInfo('Init', '通过URL参数强制直连GitHub API (不使用代理)');
+        }
+        
+        // 从本地存储读取设置
+        const cloudSyncEnabled = localStorage.getItem('easy_note_cloud_sync') === 'true';
+        logInfo('Storage', '从本地存储读取设置: ' + (cloudSyncEnabled ? '云同步模式' : '本地存储模式'));
+        
+        // 根据设置启用或禁用云同步
+        document.getElementById('cloudStorageRadio').checked = cloudSyncEnabled;
+        document.getElementById('localStorageRadio').checked = !cloudSyncEnabled;
         
         // 检查URL参数中是否有noteId
         const noteIdInURL = urlParams.get('id');
@@ -2239,7 +2251,7 @@ function init() {
         (async function() {
             try {
                 // 如果不是URL强制本地模式且没有设置forceLocalOnly，才检查云连接
-                const isUrlForcedLocalMode = localModeParam === 'true';
+                const isUrlForcedLocalMode = localParam === 'true';
                 
                 if (!forceLocalOnly && !isUrlForcedLocalMode && GITHUB_TOKEN) {
                     // 先更新同步状态为检查中
