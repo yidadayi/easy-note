@@ -2241,8 +2241,20 @@ function init() {
         logInfo('Storage', '从本地存储读取设置: ' + (cloudSyncEnabled ? '云同步模式' : '本地存储模式'));
         
         // 根据设置启用或禁用云同步
-        document.getElementById('cloudStorageRadio').checked = cloudSyncEnabled;
-        document.getElementById('localStorageRadio').checked = !cloudSyncEnabled;
+        // 确保DOM元素已经加载后再设置单选按钮状态
+        try {
+            const cloudRadio = document.getElementById('cloudStorageRadio');
+            const localRadio = document.getElementById('localStorageRadio');
+            
+            if (cloudRadio && localRadio) {
+                cloudRadio.checked = cloudSyncEnabled;
+                localRadio.checked = !cloudSyncEnabled;
+            } else {
+                logError('Init', '无法找到存储选项单选按钮，页面元素可能尚未加载');
+            }
+        } catch (e) {
+            logError('Init', '设置存储选项单选按钮状态时出错', e);
+        }
         
         // 检查URL参数中是否有noteId
         const noteIdInURL = urlParams.get('id');
@@ -3999,3 +4011,5 @@ function updateCloudStatusDisplay() {
     // 执行实际的连接检查
     checkGitHubConnection();
 }
+
+// 删除重复的initApp函数
