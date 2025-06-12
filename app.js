@@ -632,28 +632,111 @@ function copyToClipboard(text) {
 
 // 处理同步状态点击
 function handleSyncStatusClick() {
-    logInfo('Event', '点击了同步状态');
-    
-    if (!forceLocalOnly) {
-        // 检查是否已通过OAuth授权
-        if (!GitHubOAuth.hasValidOAuthToken()) {
-            // 显示GitHub授权模态框
-            const githubTokenModal = document.getElementById('githubTokenModal');
-            if (githubTokenModal) {
-                const modal = new bootstrap.Modal(githubTokenModal);
-                modal.show();
-            }
-        } else if (!isCloudSyncEnabled) {
-            // 已授权但未启用云同步
-            checkCloudConnectivity();
-            showDebugAlert('正在尝试重新连接GitHub...');
-        } else {
-            // 如果已连接，点击显示存储选项模态框
-            if (storageOptionsModal) storageOptionsModal.show();
+    try {
+        logInfo('Event', '点击了同步状态');
+        
+        // 检查是否有设置模态框
+        if (!settingsModal) {
+            logError('Event', '设置模态框不存在');
+            showError('无法显示设置', '设置界面未初始化');
+            return;
         }
-    } else {
-        // 如果是强制本地模式，点击显示存储选项模态框
-        if (storageOptionsModal) storageOptionsModal.show();
+        
+        // 如果云同步已启用并已连接
+        if (window.CloudStorage && window.GitHubOAuth && CloudStorage.isEnabled() && GitHubOAuth.hasValidOAuthToken()) {
+            logInfo('Event', '云同步已启用，显示状态');
+            
+            // 验证连接状态
+            CloudStorage.validateConnection().then(result => {
+                if (result.success) {
+                    // 更新设置模态框中的内容
+                    const statusDetails = `
+                        <div class="alert alert-success">
+                            <h5><i class="bi bi-cloud-check"></i> 云同步已启用并正常工作</h5>
+                            <p class="mb-0">已连接到GitHub账户: <strong>${result.user}</strong></p>
+                        </div>
+                    `;
+                    
+                    // 更新设置模态框内容
+                    const statusContainer = document.getElementById('cloudStatusDetails');
+                    if (statusContainer) {
+                        statusContainer.innerHTML = statusDetails;
+                    }
+                    
+                    // 显示设置模态框
+                    settingsModal.show();
+                } else {
+                    // 连接有问题，显示错误信息
+                    const errorDetails = `
+                        <div class="alert alert-danger">
+                            <h5><i class="bi bi-cloud-slash"></i> 云同步连接问题</h5>
+                            <p>${result.error || '无法连接到GitHub API'}</p>
+                            <button id="retryCloudConnectBtn" class="btn btn-sm btn-primary mt-2">
+                                <i class="bi bi-arrow-repeat"></i> 重试连接
+                            </button>
+                            <button id="showGitHubAuthBtn" class="btn btn-sm btn-secondary mt-2 ms-2">
+                                <i class="bi bi-github"></i> 重新授权
+                            </button>
+                        </div>
+                    `;
+                    
+                    // 更新设置模态框内容
+                    const statusContainer = document.getElementById('cloudStatusDetails');
+                    if (statusContainer) {
+                        statusContainer.innerHTML = errorDetails;
+                        
+                        // 添加重试按钮事件
+                        const retryBtn = document.getElementById('retryCloudConnectBtn');
+                        if (retryBtn) {
+                            retryBtn.addEventListener('click', function() {
+                                retryBtn.disabled = true;
+                                retryBtn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> 连接中...';
+                                
+                                // 重新验证连接
+                                CloudStorage.validateConnection().then(newResult => {
+                                    if (newResult.success) {
+                                        statusContainer.innerHTML = `
+                                            <div class="alert alert-success">
+                                                <h5><i class="bi bi-cloud-check"></i> 连接成功</h5>
+                                                <p class="mb-0">已恢复与GitHub的连接: <strong>${newResult.user}</strong></p>
+                                            </div>
+                                        `;
+                                        updateSyncStatus(true);
+                                    } else {
+                                        retryBtn.disabled = false;
+                                        retryBtn.innerHTML = '<i class="bi bi-arrow-repeat"></i> 重试连接';
+                                        showError('连接失败', newResult.error || '无法连接到GitHub API');
+                                    }
+                                });
+                            });
+                        }
+                        
+                        // 添加重新授权按钮事件
+                        const authBtn = document.getElementById('showGitHubAuthBtn');
+                        if (authBtn) {
+                            authBtn.addEventListener('click', function() {
+                                GitHubOAuth.requestGitHubAuthorization();
+                            });
+                        }
+                    }
+                    
+                    // 显示设置模态框
+                    settingsModal.show();
+                }
+            });
+        } else {
+            // 云同步未启用或未连接，显示设置选项
+            logInfo('Event', '云同步未启用，显示设置选项');
+            
+            // 更新设置模态框中的内容
+            populateSettingsModal();
+            
+            // 显示设置模态框
+            settingsModal.show();
+        }
+    } catch (error) {
+        logError('Event', '处理同步状态点击时出错', error);
+        showError('无法处理请求', error.message);
     }
 }
 
@@ -2005,141 +2088,83 @@ async function saveNoteToCloud(noteId, noteData) {
 
 // 修改createNewNote使用新的fetch选项
 async function createNewNote() {
-    logInfo('Create', '开始创建新笔记');
-    noteContent.value = '';
-    noteContent.setAttribute('disabled', 'true');
-    syncStatusEl.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> 正在创建云端笔记...';
-    updateNoteStatus();
-    lastSavedEl.textContent = '上次保存: 未保存';
-    isEncrypted = false;
-    lastSaved = null;
-    currentNoteId = '';
-    console.log('[createNewNote] isCloudSyncEnabled:', isCloudSyncEnabled, 'forceLocalOnly:', forceLocalOnly, 'GITHUB_TOKEN:', !!GITHUB_TOKEN);
-    // 先创建一个空Gist
-    if (isCloudSyncEnabled && !forceLocalOnly && GITHUB_TOKEN) {
-        try {
-            const noteData = {
-                content: '',
-                lastSaved: new Date().toISOString(),
-                encrypted: false
-            };
-            const noteFileName = 'note.json';
-            const files = {
-                [noteFileName]: {
-                    content: JSON.stringify(noteData)
-                }
-            };
-            
-            const requestBody = {
-                description: `Easy Note - ${new Date().toISOString()}`,
-                public: false,
-                files: files
-            };
-            
-            console.log('[createNewNote] POST /gists', files);
-            const options = createFetchOptions('POST', getAuthHeaders(), requestBody);
-            const response = await fetch(`${API_BASE_URL}/gists`, options);
-            
-            console.log('[createNewNote] POST /gists response', response.status);
-            
-            if (response.ok) {
-                const result = await response.json();
-                console.log('[createNewNote] Gist created:', result.id);
-                currentNoteId = result.id;
-                
-                // 创建成功，更新界面
-                updateURL();
-                updateNoteIdDisplay();
-                updateSyncStatus(true);
-                
-                // 保存到本地存储
-                const localKey = `note_${currentNoteId}`;
-                localStorage.setItem(localKey, JSON.stringify(noteData));
-                
-                noteContent.value = '';
-                noteContent.removeAttribute('disabled');
-                syncStatusEl.innerHTML = '<i class="bi bi-cloud-check"></i> 云同步已启用';
-                noteContent.focus();
-                
-                logInfo('Create', `创建新笔记成功，ID: ${currentNoteId}`);
-            } else {
-                console.error('[createNewNote] Failed to create gist:', response.status);
-                logError('Create', `创建新笔记失败: ${response.status}`);
-                
-                if (response.status === 403) {
-                    handleGitHubPermissionIssue('GitHub令牌权限不足，无法创建笔记');
-                } else {
-                    showError(`创建笔记失败: ${response.status} ${response.statusText}`);
-                }
-                
-                // 失败，降级为本地模式
-                forceLocalOnly = true;
-                isCloudSyncEnabled = false;
-                updateSyncStatus(false);
-                
-                // 生成本地ID
-                currentNoteId = generateUniqueId();
-                updateURL();
-                updateNoteIdDisplay();
-                
-                // 创建本地笔记
-                noteContent.value = '';
-                noteContent.removeAttribute('disabled');
-                lastSaved = null;
-                
-                // 保存到本地存储
-                const localKey = `note_${currentNoteId}`;
-                localStorage.setItem(localKey, JSON.stringify(noteData));
-            }
-        } catch (error) {
-            console.error('[createNewNote] Error:', error);
-            logError('Create', '创建笔记时出错', error);
-            showError('创建笔记时出错，已切换到本地模式', error.message);
-            
-            // 出错，降级为本地模式
-            forceLocalOnly = true;
-            isCloudSyncEnabled = false;
-            updateSyncStatus(false);
-            
-            // 生成本地ID
-            currentNoteId = generateUniqueId();
-            updateURL();
-            updateNoteIdDisplay();
-            
-            // 创建本地笔记
-            noteContent.value = '';
-            noteContent.removeAttribute('disabled');
-            lastSaved = null;
-            
-            // 保存到本地存储
-            const noteData = {
-                content: '',
-                lastSaved: new Date().toISOString(),
-                encrypted: false
-            };
-            const localKey = `note_${currentNoteId}`;
-            localStorage.setItem(localKey, JSON.stringify(noteData));
-        }
-    } else {
-        logInfo('Create', '本地模式，创建本地笔记');
-        // 本地模式，不创建Gist
-        currentNoteId = generateUniqueId();
+    try {
+        logInfo('Create', '开始创建新笔记');
         
-        updateURL();
-        updateNoteIdDisplay();
-        noteContent.value = '';
-        noteContent.removeAttribute('disabled');
-        syncStatusEl.innerHTML = '<i class="bi bi-cloud-slash"></i> 本地模式';
-        noteContent.focus();
+        // 生成唯一ID
+        const noteId = generateUniqueId();
         
-        // 保存到本地存储
+        // 创建笔记数据
         const noteData = {
             content: '',
             lastSaved: new Date().toISOString(),
             encrypted: false
         };
-        const localKey = `note_${currentNoteId}`;
+        
+        // 设置当前笔记ID
+        currentNoteId = noteId;
+        updateURL();
+        updateNoteIdDisplay();
+        
+        // 清除编辑器内容
+        if (noteContent) {
+            noteContent.value = '';
+            noteContent.removeAttribute('disabled');
+        }
+        
+        // 重置加密状态
+        isEncrypted = false;
+        if (lockBtn) {
+            lockBtn.innerHTML = '<i class="bi bi-lock"></i>';
+            lockBtn.title = '加密笔记';
+        }
+        
+        // 输出调试信息
+        logInfo('Create', `创建新笔记: ${noteId}`);
+        
+        // 保存到本地存储
+        const localKey = `note_${noteId}`;
         localStorage.setItem(localKey, JSON.stringify(noteData));
+        
+        // 更新上次保存时间
+        lastSaved = new Date();
+        updateLastSavedTime();
+        updateNoteStatus();
+        
+        // 尝试保存到云端
+        if (window.CloudStorage && CloudStorage.isEnabled() && GitHubOAuth.hasValidOAuthToken()) {
+            try {
+                const result = await CloudStorage.createNote(noteData);
+                if (result.success) {
+                    // 如果云端ID不同于本地ID，更新ID
+                    if (result.noteId !== noteId) {
+                        logInfo('Create', `云笔记ID不同，更新ID: ${noteId} -> ${result.noteId}`);
+                        // 保存旧数据到新ID
+                        localStorage.setItem(`note_${result.noteId}`, JSON.stringify(noteData));
+                        // 删除旧数据
+                        localStorage.removeItem(`note_${noteId}`);
+                        // 更新当前ID
+                        currentNoteId = result.noteId;
+                        updateURL();
+                        updateNoteIdDisplay();
+                    }
+                    logInfo('Create', '笔记保存到云端成功');
+                } else {
+                    throw new Error(result.error || '未知错误');
+                }
+            } catch (error) {
+                logError('Create', '创建笔记时出错', error);
+                showError('创建笔记时出错，已切换到本地模式', error.message);
+            }
+        } else {
+            logInfo('Create', '本地模式，创建本地笔记');
+        }
+        
+        return noteId;
+    } catch (error) {
+        logError('Create', '创建笔记时出错', error);
+        showError('创建笔记失败', error.message);
+        throw error;
     }
 }
 
@@ -2193,1738 +2218,59 @@ async function checkCloudConnectivity() {
     }
 }
 
-// 初始化应用
+// 应用初始化函数
 function init() {
     try {
-        logInfo('Init', '开始初始化应用...');
+        logInfo('Init', '应用初始化开始');
         
-        // 首先处理OAuth回调，如果有的话
-        handleOAuthProcess();
+        // 初始化DOM引用
+        initDOMReferences();
         
-        // 从URL参数中读取设置
+        // 初始化模态框
+        initModals();
+        
+        // 设置事件监听器
+        setupEventListeners();
+        
+        // 设置自动保存定时器
+        setInterval(function() {
+            if (currentNoteId && noteContent && !noteContent.disabled && noteContent.value.length > 0) {
+                saveNote();
+            }
+        }, 30000); // 30秒自动保存
+        
+        // 检查GitHub OAuth回调
+        if (window.GitHubOAuth && GitHubOAuth.initialize()) {
+            // OAuth处理中，等待完成
+            logInfo('Init', 'OAuth回调处理中，不加载笔记');
+            return;
+        }
+        
+        // 解析URL参数获取笔记ID
         const urlParams = new URLSearchParams(window.location.search);
-        const localParam = urlParams.get('local');
+        const noteId = urlParams.get('id');
         
-        // 如果URL中包含local=true参数，强制使用本地模式
-        if (localParam === 'true') {
-            forceLocalOnly = true;
-            logInfo('Init', '通过URL参数强制使用本地模式');
-            
-            // 添加移动测试模式指示器
-            const mobileTestIndicator = document.createElement('div');
-            mobileTestIndicator.className = 'mobile-test-indicator';
-            mobileTestIndicator.textContent = '移动测试模式';
-            document.body.appendChild(mobileTestIndicator);
-        }
-
-        // OAuth模式不再需要代理设置，忽略direct参数
-        
-        // 处理OAuth回调和初始化过程
-        async function handleOAuthProcess() {
-            try {
-                // 检查是否是OAuth回调
-                const token = await GitHubOAuth.handleOAuthCallback();
-                if (token) {
-                    logInfo('Auth', 'OAuth认证成功，已获取令牌');
-                    GITHUB_TOKEN = token;
-                    localStorage.setItem('easy_note_auth_status', 'oauth_success');
-                    
-                    // 显示成功消息
-                    showDebugAlert('GitHub授权成功！');
-                }
-            } catch (error) {
-                logError('Auth', 'OAuth处理过程中出错', error);
-            }
+        if (noteId) {
+            // 如果URL中有笔记ID，加载该笔记
+            logInfo('Init', `正在加载笔记: ${noteId}`);
+            loadNote(noteId);
+        } else {
+            // 如果URL中没有笔记ID，创建新笔记
+            logInfo('Init', '未指定笔记ID，创建新笔记');
+            createNewNote();
         }
         
-        // 从本地存储读取设置
-        const cloudSyncEnabled = localStorage.getItem('easy_note_cloud_sync') === 'true';
-        logInfo('Storage', '从本地存储读取设置: ' + (cloudSyncEnabled ? '云同步模式' : '本地存储模式'));
+        // 更新同步状态显示
+        updateSyncStatus();
         
-        // 根据设置启用或禁用云同步
-        // 确保DOM元素已经加载后再设置单选按钮状态
-        try {
-            const cloudRadio = document.getElementById('useGitHub');
-            const localRadio = document.getElementById('useLocalOnly');
-            
-            if (cloudRadio && localRadio) {
-                cloudRadio.checked = cloudSyncEnabled;
-                localRadio.checked = !cloudSyncEnabled;
-            } else {
-                logError('Init', '无法找到存储选项单选按钮，页面元素可能尚未加载');
-            }
-        } catch (e) {
-            logError('Init', '设置存储选项单选按钮状态时出错', e);
-        }
-        
-        // 检查URL参数中是否有noteId
-        const noteIdInURL = urlParams.get('id');
-        
-        // 使用新的异步方式处理初始化
-        (async function() {
-            try {
-                // 如果不是URL强制本地模式且没有设置forceLocalOnly，才检查云连接
-                const isUrlForcedLocalMode = localParam === 'true';
-                
-                if (!forceLocalOnly && !isUrlForcedLocalMode && GITHUB_TOKEN) {
-                    // 先更新同步状态为检查中
-                    if (syncStatusEl) {
-                        syncStatusEl.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> 正在检查GitHub连接...';
-                    }
-                    
-                    // 在后台检查云连接，不阻塞主流程
-                    checkCloudConnectivity().catch(error => {
-                        logError('Init', '检查云连接出错', error);
-                    });
-                } else {
-                    // 已经在前面更新过URL强制本地模式的状态，这里只处理非URL强制的本地模式
-                    if (!isUrlForcedLocalMode) {
-                        updateSyncStatus(false);
-                    }
-                }
-                
-                // 加载或创建笔记
-                if (noteIdInURL) {
-                    logInfo('Init', `从URL参数中检测到笔记ID: ${noteIdInURL}`);
-                    // 尝试加载笔记
-                    loadNote(noteIdInURL);
-                } else {
-                    logInfo('Init', '未检测到笔记ID，将创建新笔记');
-                    // 创建新笔记
-                    createNewNote();
-                }
-            } catch (asyncError) {
-                logError('Init', '异步初始化过程出错', asyncError);
-                showError('初始化过程出错', asyncError.message);
-                
-                // 出错时也创建一个新笔记
-                createNewNote();
-            }
-        })();
-        
-        // 添加笔记内容变更监听
-        if (noteContent) {
-            noteContent.addEventListener('input', function() {
-                // 如果距离上次保存超过2秒，标记为未保存
-                if (!lastSaved || new Date() - lastSaved > 2000) {
-                    if (lastSavedEl) {
-                        lastSavedEl.textContent = '上次保存: 未保存';
-                        lastSavedEl.classList.add('text-danger');
-                    }
-                }
-                
-                // 如果笔记内容有变更，启动自动保存计时器
-                if (noteContent.value && !autoSaveTimer) {
-                    autoSaveTimer = setTimeout(saveNote, 2000);
-                }
-            });
-        }
+        // 周期性检查URL变化
+        setInterval(checkURLChange, 1000);
         
         logInfo('Init', '应用初始化完成');
     } catch (error) {
-        // 更详细地记录错误信息
-        const errorDetails = {
-            message: error?.message || '未知错误',
-            stack: error?.stack,
-            type: error?.constructor?.name || typeof error
-        };
-        logError('Init', '应用初始化失败', errorDetails);
-        console.error('初始化应用详细错误:', error);
-        throw error; // 重新抛出错误以便主try-catch块捕获
+        logError('Init', '应用初始化失败', error);
+        alert(`初始化失败: ${error.message}\n请刷新页面重试。`);
     }
-}
-
-// 加载笔记函数
-async function loadNote(noteId) {
-    try {
-        logInfo('Load', `开始加载笔记: ${noteId}`);
-        
-        if (!noteId) {
-            logError('Load', '笔记ID无效');
-            showError('无效的笔记ID');
-            return;
-        }
-        
-        // 禁用编辑器，显示加载状态
-        noteContent.value = '';
-        noteContent.setAttribute('disabled', 'true');
-        lastSavedEl.textContent = '上次保存: 加载中...';
-        lastSavedEl.classList.remove('text-danger');
-        syncStatusEl.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> 正在加载笔记...';
-        noteStatusEl.innerHTML = '加载中...';
-        
-        // 设置当前笔记ID
-        currentNoteId = noteId;
-        updateURL();
-        updateNoteIdDisplay();
-        
-        // 首先尝试从本地存储加载
-        const localKey = `note_${noteId}`;
-        const localData = localStorage.getItem(localKey);
-        
-        if (localData) {
-            try {
-                const parsedData = JSON.parse(localData);
-                logInfo('Load', '从本地存储加载笔记成功', parsedData);
-                
-                // 更新编辑器和UI
-                noteContent.value = parsedData.content || '';
-                isEncrypted = parsedData.encrypted || false;
-                lastSaved = parsedData.lastSaved ? new Date(parsedData.lastSaved) : new Date();
-                updateLastSavedTime();
-                
-                // 如果是加密笔记，显示解锁界面
-                if (isEncrypted) {
-                    logInfo('Load', '笔记已加密，显示解锁界面');
-                    noteContent.value = '笔记已加密，请解锁查看内容';
-                    noteContent.setAttribute('disabled', 'true');
-                    lockBtn.innerHTML = '<i class="bi bi-unlock"></i>';
-                    lockBtn.title = '解锁笔记';
-                    if (unlockModal) unlockModal.show();
-                } else {
-                    noteContent.removeAttribute('disabled');
-                }
-                
-                // 更新笔记状态
-                updateNoteStatus();
-            } catch (parseError) {
-                logError('Load', '解析本地笔记数据失败', parseError);
-                localStorage.removeItem(localKey); // 移除无效数据
-            }
-        }
-        
-        // 检查是否在URL中强制使用本地模式
-        const urlParams = new URLSearchParams(window.location.search);
-        const localModeParam = urlParams.get('local');
-        const isUrlForcedLocalMode = localModeParam === 'true';
-        
-        // 如果启用了云同步且不是URL强制本地模式，尝试从云端加载
-        if (!forceLocalOnly && !isUrlForcedLocalMode && GITHUB_TOKEN) {
-            try {
-                syncStatusEl.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> 正在从云端同步...';
-                
-                const cloudNote = await fetchNoteFromCloud(noteId);
-                
-                if (cloudNote) {
-                    logInfo('Load', '从云端加载笔记成功', cloudNote);
-                    
-                    // 检查是否需要更新本地数据
-                    const localUpdateNeeded = !localData || 
-                                            (cloudNote.lastSaved && (!lastSaved || new Date(cloudNote.lastSaved) > lastSaved));
-                    
-                    if (localUpdateNeeded) {
-                        logInfo('Load', '云端数据较新，更新本地存储');
-                        
-                        // 更新编辑器和UI
-                        noteContent.value = cloudNote.content || '';
-                        isEncrypted = cloudNote.encrypted || false;
-                        lastSaved = cloudNote.lastSaved ? new Date(cloudNote.lastSaved) : new Date();
-                        updateLastSavedTime();
-                        
-                        // 如果是加密笔记，显示解锁界面
-                        if (isEncrypted) {
-                            logInfo('Load', '笔记已加密，显示解锁界面');
-                            noteContent.value = '笔记已加密，请解锁查看内容';
-                            noteContent.setAttribute('disabled', 'true');
-                            lockBtn.innerHTML = '<i class="bi bi-unlock"></i>';
-                            lockBtn.title = '解锁笔记';
-                            if (unlockModal) unlockModal.show();
-                        } else {
-                            noteContent.removeAttribute('disabled');
-                        }
-                        
-                        // 更新本地存储
-                        localStorage.setItem(localKey, JSON.stringify(cloudNote));
-                    }
-                    
-                    // 更新同步状态
-                    isCloudSyncEnabled = true;
-                    updateSyncStatus(true);
-                } else {
-                    // 云端笔记不存在，但本地有数据
-                    if (localData) {
-                        logInfo('Load', '云端笔记不存在，但本地有数据');
-                        // 保持本地数据，不做更改
-                    } else {
-                        logError('Load', '笔记在云端和本地都不存在');
-                        showError('笔记未找到');
-                        createNewNote(); // 创建新笔记
-                        return;
-                    }
-                }
-            } catch (cloudError) {
-                logError('Load', '从云端加载笔记失败', cloudError);
-                
-                // 如果本地没有数据，且云端加载失败，创建新笔记
-                if (!localData) {
-                    showError('无法加载笔记', cloudError.message);
-                    createNewNote();
-                    return;
-                }
-                
-                // 更新同步状态
-                updateSyncStatus(false);
-            }
-        } else {
-            // 本地模式
-            updateSyncStatus(false);
-            
-            // 如果本地没有数据，创建新笔记
-            if (!localData) {
-                logError('Load', '本地模式下找不到笔记');
-                showError('笔记未找到');
-                createNewNote();
-                return;
-            }
-        }
-        
-        // 启用编辑器
-        if (!isEncrypted) {
-            noteContent.removeAttribute('disabled');
-            noteContent.focus();
-        }
-        
-        // 更新笔记状态
-        updateNoteStatus();
-        logInfo('Load', '笔记加载完成');
-    } catch (error) {
-        logError('Load', '加载笔记失败', error);
-        showError('加载笔记失败', error.message);
-        
-        // 出错时创建新笔记
-        createNewNote();
-    }
-}
-
-// 更新上次保存时间显示
-function updateLastSavedTime() {
-    if (lastSavedEl && lastSaved) {
-        const now = new Date();
-        const diff = Math.floor((now - lastSaved) / 1000); // 秒数差
-        
-        let timeText;
-        if (diff < 60) {
-            timeText = `${diff}秒前`;
-        } else if (diff < 3600) {
-            timeText = `${Math.floor(diff / 60)}分钟前`;
-        } else if (diff < 86400) {
-            timeText = `${Math.floor(diff / 3600)}小时前`;
-        } else {
-            timeText = lastSaved.toLocaleString();
-        }
-        
-        lastSavedEl.textContent = `上次保存: ${timeText}`;
-        lastSavedEl.classList.remove('text-danger');
-    }
-}
-
-// 更新同步状态UI
-function updateSyncStatus(isConnected) {
-    if (syncStatusEl) {
-        // 检查是否是通过URL参数设置的本地模式
-        const urlParams = new URLSearchParams(window.location.search);
-        const localModeParam = urlParams.get('local');
-        const isUrlForcedLocalMode = localModeParam === 'true';
-        
-        if (forceLocalOnly) {
-            if (isUrlForcedLocalMode) {
-                syncStatusEl.innerHTML = '<i class="bi bi-phone"></i> 移动测试模式';
-                syncStatusEl.title = '通过URL参数强制使用本地存储（移动测试模式）';
-                syncStatusEl.classList.remove('text-success', 'text-danger', 'text-secondary');
-                syncStatusEl.classList.add('text-info');
-            } else {
-                syncStatusEl.innerHTML = '<i class="bi bi-cloud-slash"></i> 本地模式';
-                syncStatusEl.title = '点击修改存储设置';
-                syncStatusEl.classList.remove('text-success', 'text-danger', 'text-info');
-                syncStatusEl.classList.add('text-secondary');
-            }
-        } else if (isConnected) {
-            syncStatusEl.innerHTML = '<i class="bi bi-cloud-check"></i> 云同步已启用';
-            syncStatusEl.title = '已连接到GitHub';
-            syncStatusEl.classList.remove('text-danger', 'text-secondary', 'text-info');
-            syncStatusEl.classList.add('text-success');
-            isCloudSyncEnabled = true;
-        } else {
-            if (GITHUB_TOKEN) {
-                syncStatusEl.innerHTML = '<i class="bi bi-cloud-slash"></i> 云同步未连接';
-                syncStatusEl.title = '点击尝试重新连接';
-            } else {
-                syncStatusEl.innerHTML = '<i class="bi bi-cloud-slash"></i> 未设置GitHub令牌';
-                syncStatusEl.title = '点击设置GitHub令牌';
-            }
-            syncStatusEl.classList.remove('text-success', 'text-secondary', 'text-info');
-            syncStatusEl.classList.add('text-danger');
-            isCloudSyncEnabled = false;
-        }
-    }
-}
-
-// 更新笔记状态UI
-function updateNoteStatus() {
-    if (noteStatusEl) {
-        if (isEncrypted) {
-            noteStatusEl.innerHTML = '<i class="bi bi-lock"></i> 已加密';
-            noteStatusEl.classList.remove('text-success');
-            noteStatusEl.classList.add('text-warning');
-        } else {
-            noteStatusEl.innerHTML = '<i class="bi bi-unlock"></i> 未加密';
-            noteStatusEl.classList.remove('text-warning');
-            noteStatusEl.classList.add('text-success');
-        }
-    }
-}
-
-// 保存笔记函数
-async function saveNote() {
-    try {
-        // 清除自动保存计时器
-        if (autoSaveTimer) {
-            clearTimeout(autoSaveTimer);
-            autoSaveTimer = null;
-        }
-        
-        // 如果没有笔记ID或编辑器被禁用，不保存
-        if (!currentNoteId || !noteContent || noteContent.disabled) {
-            return;
-        }
-        
-        // 构建笔记数据
-        const noteData = {
-            content: noteContent.value,
-            lastSaved: new Date().toISOString(),
-            encrypted: isEncrypted
-        };
-        
-        // 保存到本地存储
-        const localKey = `note_${currentNoteId}`;
-        localStorage.setItem(localKey, JSON.stringify(noteData));
-        lastSaved = new Date();
-        updateLastSavedTime();
-        
-        // 检查是否在URL中强制使用本地模式
-        const urlParams = new URLSearchParams(window.location.search);
-        const localModeParam = urlParams.get('local');
-        const isUrlForcedLocalMode = localModeParam === 'true';
-        
-        // 如果启用了云同步且未强制使用本地模式，尝试保存到云端
-        if (isCloudSyncEnabled && !forceLocalOnly && GITHUB_TOKEN && !isUrlForcedLocalMode) {
-            try {
-                await saveNoteToCloud(currentNoteId, noteData);
-                logInfo('Save', '笔记保存到云端成功');
-            } catch (cloudError) {
-                logError('Save', '保存到云端失败', cloudError);
-                // 只显示一次错误提示
-                if (!saveErrorShown) {
-                    showError('保存到云端失败，但已保存到本地', cloudError.message);
-                    saveErrorShown = true;
-                    // 5秒后重置错误标志
-                    setTimeout(() => { saveErrorShown = false; }, 5000);
-                }
-            }
-        } else {
-            // 根据情况记录不同的日志消息
-            if (isUrlForcedLocalMode) {
-                logInfo('Save', '移动测试模式: 仅保存到本地存储');
-            } else if (forceLocalOnly) {
-                logInfo('Save', '本地模式: 仅保存到本地存储');
-            } else {
-                logInfo('Save', '仅保存到本地存储');
-            }
-        }
-    } catch (error) {
-        logError('Save', '保存笔记失败', error);
-        showError('保存笔记失败', error.message);
-    }
-}
-
-// 声明自动保存计时器变量
-let autoSaveTimer = null;
-let saveErrorShown = false;
-
-// 更新URL
-function updateURL() {
-    if (currentNoteId) {
-        const url = new URL(window.location.href);
-        url.searchParams.set('id', currentNoteId);
-        window.history.replaceState({}, '', url.toString());
-        logInfo('Navigation', `更新URL参数: id=${currentNoteId}`);
-    }
-}
-
-// 生成唯一ID
-function generateUniqueId() {
-    return Math.random().toString(36).substring(2, 15) + 
-           Math.random().toString(36).substring(2, 15);
-}
-
-// 加密笔记
-function encryptNote(password) {
-    if (!password || !noteContent || !noteContent.value) {
-        return false;
-    }
-    
-    try {
-        // 简单的密码加密实现
-        const plaintext = noteContent.value;
-        const encrypted = CryptoJS.AES.encrypt(plaintext, password).toString();
-        
-        // 更新编辑器和状态
-        noteContent.value = encrypted;
-        isEncrypted = true;
-        
-        // 更新UI
-        lockBtn.innerHTML = '<i class="bi bi-unlock"></i>';
-        lockBtn.title = '解锁笔记';
-        updateNoteStatus();
-        
-        // 保存笔记
-        saveNote();
-        
-        return true;
-    } catch (error) {
-        logError('Encrypt', '加密笔记失败', error);
-        showError('加密笔记失败', error.message);
-        return false;
-    }
-}
-
-// 解密笔记
-function decryptNote(password) {
-    if (!password || !noteContent || !isEncrypted) {
-        return false;
-    }
-    
-    try {
-        // 从本地存储获取原始加密数据
-        const localKey = `note_${currentNoteId}`;
-        const localData = localStorage.getItem(localKey);
-        
-        if (!localData) {
-            logError('Decrypt', '找不到本地存储的笔记数据');
-            return false;
-        }
-        
-        const parsedData = JSON.parse(localData);
-        const encrypted = parsedData.content;
-        
-        // 尝试解密
-        const decrypted = CryptoJS.AES.decrypt(encrypted, password).toString(CryptoJS.enc.Utf8);
-        
-        if (!decrypted) {
-            logError('Decrypt', '解密失败，可能是密码错误');
-            return false;
-        }
-        
-        // 更新编辑器和状态
-        noteContent.value = decrypted;
-        noteContent.removeAttribute('disabled');
-        isEncrypted = false;
-        
-        // 更新UI
-        lockBtn.innerHTML = '<i class="bi bi-lock"></i>';
-        lockBtn.title = '加密笔记';
-        updateNoteStatus();
-        
-        return true;
-    } catch (error) {
-        logError('Decrypt', '解密笔记失败', error);
-        showError('解密笔记失败，密码可能不正确', error.message);
-        return false;
-    }
-}
-
-// 添加网络诊断功能
-async function diagnoseNetworkConnectivity() {
-    const results = {
-        canReachGitHub: false,
-        canReachAPI: false,
-        errors: [],
-        errorDetails: {
-            statusCode: null,
-            message: null,
-            headers: null
-        }
-    };
-    
-    try {
-        // 测试GitHub网站连接
-        try {
-            // 添加重试逻辑
-            let githubRetries = 0;
-            const maxGithubRetries = 2;
-            let githubSuccess = false;
-            
-            while (!githubSuccess && githubRetries <= maxGithubRetries) {
-                try {
-                    const githubResponse = await fetch('https://github.com', {
-                        method: 'HEAD',
-                        mode: 'no-cors', // 使用no-cors模式可以检测连接性，但无法读取响应内容
-                        cache: 'no-store',
-                        credentials: 'omit'
-                    });
-                    
-                    // 由于no-cors模式，我们无法真正获取状态码，但至少请求没有抛出异常
-                    results.canReachGitHub = true;
-                    githubSuccess = true;
-                    logInfo('Network', 'GitHub网站连接成功');
-                } catch (retryError) {
-                    githubRetries++;
-                    if (githubRetries <= maxGithubRetries) {
-                        // 在重试前等待
-                        const waitTime = Math.pow(2, githubRetries) * 500; // 指数退避
-                        logInfo('Network', `GitHub网站连接失败，等待${waitTime}ms后重试... (${githubRetries}/${maxGithubRetries})`);
-                        await new Promise(resolve => setTimeout(resolve, waitTime));
-                    } else {
-                        throw retryError; // 如果所有重试都失败，抛出最后一个错误
-                    }
-                }
-            }
-        } catch (githubError) {
-            results.errors.push(`无法连接到GitHub网站: ${githubError.message}`);
-            logError('Network', '无法连接到GitHub网站', githubError);
-        }
-        
-        // 测试GitHub API连接 - 尝试多个不同的端点
-        const apiEndpoints = [
-            { url: `${API_BASE_URL}/zen`, description: 'GitHub API (Zen)' },
-            { url: `${API_BASE_URL}/meta`, description: 'GitHub API (Meta)' },
-            { url: `${API_BASE_URL}/emojis`, description: 'GitHub API (Emojis)' }
-        ];
-        
-        let apiSuccessful = false;
-        
-        for (const endpoint of apiEndpoints) {
-            if (apiSuccessful) break; // 如果已经成功连接，跳过剩余端点
-            
-            try {
-                // 添加重试逻辑
-                let apiRetries = 0;
-                const maxApiRetries = 2;
-                
-                while (apiRetries <= maxApiRetries && !apiSuccessful) {
-                    try {
-                        logInfo('Network', `尝试连接到${endpoint.description}: ${endpoint.url}`);
-                        
-                        const apiResponse = await fetch(endpoint.url, {
-                            method: 'GET', // 使用GET而非HEAD以获取更准确的响应
-                            mode: 'cors',
-                            cache: 'no-store',
-                            credentials: 'omit',
-                            headers: {
-                                'Accept': 'application/vnd.github.v3+json',
-                                'User-Agent': 'EasyNote-App' // 添加User-Agent头
-                            }
-                        });
-                        
-                        // 记录响应状态和头信息
-                        results.errorDetails.statusCode = apiResponse.status;
-                        results.errorDetails.headers = {};
-                        apiResponse.headers.forEach((value, key) => {
-                            results.errorDetails.headers[key] = value;
-                        });
-                        
-                        if (apiResponse.ok || apiResponse.status === 401 || apiResponse.status === 403) {
-                            // 401表示未授权，403表示禁止访问，但API连接是成功的
-                            results.canReachAPI = true;
-                            apiSuccessful = true;
-                            
-                            // 处理不同的状态码
-                            if (apiResponse.status === 200) {
-                                logInfo('Network', `${endpoint.description}连接成功 (HTTP 200)`);
-                            } else if (apiResponse.status === 401) {
-                                logInfo('Network', `${endpoint.description}可以访问，但需要授权 (HTTP 401)`);
-                                results.errors.push(`${endpoint.description}需要授权 (HTTP 401)`);
-                            } else if (apiResponse.status === 403) {
-                                logInfo('Network', `${endpoint.description}可以访问，但访问被禁止 (HTTP 403)`);
-                                
-                                // 尝试获取更详细的错误信息
-                                try {
-                                    const errorData = await apiResponse.json();
-                                    if (errorData && errorData.message) {
-                                        results.errorDetails.message = errorData.message;
-                                        results.errors.push(`${endpoint.description}访问被禁止: ${errorData.message}`);
-                                        
-                                        // 检查是否是速率限制问题
-                                        if (errorData.message.includes('rate limit')) {
-                                            const rateLimit = {
-                                                limit: apiResponse.headers.get('X-RateLimit-Limit'),
-                                                remaining: apiResponse.headers.get('X-RateLimit-Remaining'),
-                                                reset: apiResponse.headers.get('X-RateLimit-Reset')
-                                            };
-                                            
-                                            let resetTime = '未知';
-                                            if (rateLimit.reset) {
-                                                const date = new Date(rateLimit.reset * 1000);
-                                                resetTime = date.toLocaleTimeString();
-                                            }
-                                            
-                                            results.errors.push(`速率限制: ${rateLimit.remaining}/${rateLimit.limit}，将在${resetTime}重置`);
-                                        }
-                                    } else {
-                                        results.errors.push(`${endpoint.description}访问被禁止 (HTTP 403)`);
-                                    }
-                                } catch (parseError) {
-                                    results.errors.push(`${endpoint.description}访问被禁止 (HTTP 403)`);
-                                }
-                            }
-                        } else {
-                            // 其他状态码
-                            try {
-                                const errorText = await apiResponse.text();
-                                results.errorDetails.message = errorText;
-                                results.errors.push(`${endpoint.description}返回异常状态: ${apiResponse.status}`);
-                                logWarning('Network', `${endpoint.description}连接异常: ${apiResponse.status}`, errorText);
-                            } catch (textError) {
-                                results.errors.push(`${endpoint.description}返回异常状态: ${apiResponse.status}`);
-                                logWarning('Network', `${endpoint.description}连接异常: ${apiResponse.status}`);
-                            }
-                            
-                            // 如果是5xx服务器错误，尝试重试
-                            if (apiResponse.status >= 500 && apiResponse.status < 600) {
-                                apiRetries++;
-                                if (apiRetries <= maxApiRetries) {
-                                    const waitTime = Math.pow(2, apiRetries) * 1000; // 指数退避
-                                    logInfo('Network', `${endpoint.description}服务器错误，等待${waitTime}ms后重试... (${apiRetries}/${maxApiRetries})`);
-                                    await new Promise(resolve => setTimeout(resolve, waitTime));
-                                    continue;
-                                }
-                            }
-                        }
-                    } catch (retryError) {
-                        apiRetries++;
-                        if (apiRetries <= maxApiRetries) {
-                            // 在重试前等待
-                            const waitTime = Math.pow(2, apiRetries) * 1000; // 指数退避
-                            logInfo('Network', `${endpoint.description}连接失败，等待${waitTime}ms后重试... (${apiRetries}/${maxApiRetries})`);
-                            await new Promise(resolve => setTimeout(resolve, waitTime));
-                        } else {
-                            results.errors.push(`无法连接到${endpoint.description}: ${retryError.message}`);
-                            logError('Network', `无法连接到${endpoint.description}`, retryError);
-                            break; // 跳出当前端点的重试循环，尝试下一个端点
-                        }
-                    }
-                }
-            } catch (endpointError) {
-                results.errors.push(`测试${endpoint.description}时出错: ${endpointError.message}`);
-                logError('Network', `测试${endpoint.description}时出错`, endpointError);
-            }
-        }
-        
-        return results;
-    } catch (error) {
-        results.errors.push(`网络诊断过程出错: ${error.message}`);
-        logError('Network', '网络诊断过程出错', error);
-        return results;
-    }
-}
-
-// 处理网络错误的帮助函数
-function handleNetworkError(error, operation) {
-    logError('Network', `${operation}过程中发生网络错误`, error);
-    
-    // 构建错误消息
-    const errorMessage = `${operation}失败: 网络连接问题`;
-    const detailMessage = `
-        应用无法连接到GitHub API。
-        
-        可能的原因:
-        - 网络连接不稳定
-        - 浏览器阻止了跨域请求
-        - 防火墙或代理拦截了请求
-        - GitHub API暂时不可用
-        
-        错误详情: ${error.message}
-        
-        建议:
-        - 检查您的网络连接
-        - 尝试使用现代浏览器如Chrome或Edge
-        - 暂时关闭浏览器扩展
-        - 尝试使用隐私/无痕浏览模式
-    `;
-    
-    // 显示错误并添加诊断按钮
-    showError(errorMessage, detailMessage);
-    
-    const errorEl = document.getElementById('errorMessage');
-    if (errorEl) {
-        // 添加网络诊断按钮
-        const diagButton = document.createElement('button');
-        diagButton.className = 'btn btn-sm btn-info mt-2';
-        diagButton.innerText = '运行网络诊断';
-        diagButton.onclick = async () => {
-            // 显示诊断中
-            showDebugAlert('正在诊断网络连接，请稍候...');
-            
-            // 运行网络诊断
-            try {
-                const networkResults = await diagnoseNetworkConnectivity();
-                
-                // 创建诊断结果模态框
-                const diagModal = createDiagResultModal();
-                const diagBody = diagModal.querySelector('.modal-body');
-                
-                // 构建诊断结果内容
-                let statusHtml = '';
-                if (networkResults.canReachGitHub && networkResults.canReachAPI) {
-                    statusHtml = `
-                        <div class="alert alert-success">
-                            <i class="bi bi-wifi"></i> <strong>网络连接正常</strong><br>
-                            应用可以连接到GitHub网站和API。<br>
-                            <hr>
-                            <div class="mt-2">
-                                - GitHub网站: <span class="text-success">✓ 可连接</span><br>
-                                - GitHub API: <span class="text-success">✓ 可连接</span><br>
-                            </div>
-                            <hr>
-                            <div class="mt-2">
-                                如果您仍然遇到问题，可能是:<br>
-                                - GitHub令牌权限问题<br>
-                                - 特定API端点的访问限制<br>
-                                - 浏览器扩展干扰<br>
-                            </div>
-                        </div>
-                    `;
-                } else if (networkResults.canReachGitHub && !networkResults.canReachAPI) {
-                    // 构建HTTP错误详情
-                    let errorDetailsHtml = '';
-                    if (networkResults.errorDetails.statusCode) {
-                        errorDetailsHtml += `<div class="text-danger mt-2">
-                            错误状态码: ${networkResults.errorDetails.statusCode}<br>`;
-                        
-                        if (networkResults.errorDetails.message) {
-                            errorDetailsHtml += `错误消息: ${networkResults.errorDetails.message}<br>`;
-                        }
-                        
-                        if (networkResults.errorDetails.headers) {
-                            // 显示重要的响应头
-                            const importantHeaders = ['x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset', 
-                                                    'retry-after', 'x-github-request-id'];
-                            
-                            let hasImportantHeaders = false;
-                            let headersHtml = '';
-                            
-                            for (const header of importantHeaders) {
-                                if (networkResults.errorDetails.headers[header]) {
-                                    hasImportantHeaders = true;
-                                    if (header === 'x-ratelimit-reset' && networkResults.errorDetails.headers[header]) {
-                                        const date = new Date(networkResults.errorDetails.headers[header] * 1000);
-                                        headersHtml += `${header}: ${networkResults.errorDetails.headers[header]} (${date.toLocaleTimeString()})<br>`;
-                                    } else {
-                                        headersHtml += `${header}: ${networkResults.errorDetails.headers[header]}<br>`;
-                                    }
-                                }
-                            }
-                            
-                            if (hasImportantHeaders) {
-                                errorDetailsHtml += `<br>响应头信息:<br>${headersHtml}`;
-                            }
-                        }
-                        
-                        errorDetailsHtml += `</div>`;
-                    }
-                    
-                    // 构建可能的解决方案，基于具体的错误
-                    let solutionsHtml = '';
-                    if (networkResults.errorDetails.statusCode === 403) {
-                        // 403 Forbidden 错误的解决方案
-                        if (networkResults.errorDetails.message && networkResults.errorDetails.message.includes('rate limit')) {
-                            // 速率限制问题
-                            solutionsHtml = `
-                                <div class="mt-3">
-                                    <strong>解决方案:</strong><br>
-                                    - 您已超出GitHub API速率限制<br>
-                                    - 等待一段时间后再试<br>
-                                    - 使用GitHub个人访问令牌可提高限制<br>
-                                    - 确保您的令牌具有正确的权限<br>
-                                </div>
-                            `;
-                        } else {
-                            // 其他403错误
-                            solutionsHtml = `
-                                <div class="mt-3">
-                                    <strong>解决方案:</strong><br>
-                                    - 检查您的GitHub令牌权限<br>
-                                    - 令牌需要具有<code>gist</code>权限<br>
-                                    - 尝试使用新的个人访问令牌<br>
-                                    - 检查您的网络/代理是否限制GitHub API访问<br>
-                                </div>
-                            `;
-                        }
-                    } else if (networkResults.errorDetails.statusCode === 401) {
-                        // 401 Unauthorized 错误的解决方案
-                        solutionsHtml = `
-                            <div class="mt-3">
-                                <strong>解决方案:</strong><br>
-                                - 您的GitHub令牌无效或已过期<br>
-                                - 请创建新的个人访问令牌<br>
-                                - 确保令牌具有<code>gist</code>权限<br>
-                            </div>
-                        `;
-                    } else if (networkResults.errorDetails.statusCode >= 500) {
-                        // 5xx 服务器错误的解决方案
-                        solutionsHtml = `
-                            <div class="mt-3">
-                                <strong>解决方案:</strong><br>
-                                - GitHub服务器暂时出现问题<br>
-                                - 稍后再试<br>
-                                - 查看 <a href="https://www.githubstatus.com/" target="_blank">GitHub状态页面</a><br>
-                            </div>
-                        `;
-                    } else {
-                        // 默认解决方案
-                        solutionsHtml = `
-                            <div class="mt-3">
-                                <strong>解决方案:</strong><br>
-                                - 网络连接不稳定<br>
-                                - 浏览器阻止了跨域请求<br>
-                                - 防火墙或代理拦截了请求<br>
-                                - GitHub API暂时不可用<br>
-                                <br>
-                                建议:<br>
-                                - 检查您的网络连接<br>
-                                - 尝试使用现代浏览器如Chrome或Edge<br>
-                                - 暂时关闭浏览器扩展<br>
-                                - 尝试使用隐私/无痕浏览模式<br>
-                                - 尝试使用VPN或代理服务<br>
-                            </div>
-                        `;
-                    }
-                    
-                    statusHtml = `
-                        <div class="alert alert-warning">
-                            <i class="bi bi-wifi-off"></i> <strong>部分网络连接问题</strong><br>
-                            应用可以连接到GitHub网站，但无法连接到API。<br>
-                            <hr>
-                            <div class="mt-2">
-                                - GitHub网站: <span class="text-success">✓ 可连接</span><br>
-                                - GitHub API: <span class="text-danger">✗ 无法连接</span><br>
-                            </div>
-                            <hr>
-                            ${errorDetailsHtml}
-                            <hr>
-                            <div class="mt-2">
-                                <strong>可能的原因:</strong><br>
-                                - 防火墙或代理阻止了API访问<br>
-                                - GitHub API暂时不可用<br>
-                                - 您的网络提供商限制了API访问<br>
-                                - 浏览器的安全设置或扩展阻止了请求<br>
-                            </div>
-                            ${solutionsHtml}
-                        </div>
-                    `;
-                } else if (!networkResults.canReachGitHub && !networkResults.canReachAPI) {
-                    statusHtml = `
-                        <div class="alert alert-danger">
-                            <i class="bi bi-wifi-off"></i> <strong>网络连接问题</strong><br>
-                            应用无法连接到GitHub网站和API。<br>
-                            <hr>
-                            <div class="mt-2">
-                                - GitHub网站: <span class="text-danger">✗ 无法连接</span><br>
-                                - GitHub API: <span class="text-danger">✗ 无法连接</span><br>
-                            </div>
-                            <hr>
-                            <div class="text-danger mt-2">
-                                错误详情: ${networkResults.errors.join('<br>')}
-                            </div>
-                            <hr>
-                            <div class="mt-2">
-                                <strong>可能的原因:</strong><br>
-                                - 网络连接不可用<br>
-                                - GitHub被屏蔽或限制<br>
-                                - 严格的防火墙设置<br>
-                                <br>
-                                <strong>建议:</strong><br>
-                                - 检查您的网络连接<br>
-                                - 确认是否可以访问其他网站<br>
-                                - 考虑使用VPN或代理服务<br>
-                                - 尝试在不同的网络环境下访问<br>
-                            </div>
-                        </div>
-                    `;
-                }
-                
-                diagBody.innerHTML = `
-                    <h5>网络连接诊断</h5>
-                    ${statusHtml}
-                    <div class="mt-3 text-center">
-                        <button class="btn btn-primary retry-btn me-2">
-                            <i class="bi bi-arrow-repeat"></i> 重新尝试连接
-                        </button>
-                        <button class="btn btn-secondary advanced-btn">
-                            <i class="bi bi-gear"></i> 高级选项
-                        </button>
-                    </div>
-                    <div class="mt-3 advanced-options" style="display:none;">
-                        <div class="card">
-                            <div class="card-header bg-light">
-                                <strong>高级选项</strong>
-                            </div>
-                            <div class="card-body">
-                                <div class="mb-2">
-                                    <button class="btn btn-sm btn-outline-secondary clear-cache-btn">
-                                        <i class="bi bi-trash"></i> 清除应用缓存
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-secondary ms-2 check-cors-btn">
-                                        <i class="bi bi-shield-check"></i> CORS诊断
-                                    </button>
-                                </div>
-                                <div class="mb-2">
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox" id="useAltApi">
-                                        <label class="form-check-label" for="useAltApi">尝试使用备用API</label>
-                                    </div>
-                                </div>
-                                <div class="small text-muted mt-2">
-                                    请注意: 高级选项适用于技术用户，可能需要重新加载应用才能生效。
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-                
-                // 添加事件处理程序
-                const retryBtn = diagBody.querySelector('.retry-btn');
-                const advancedBtn = diagBody.querySelector('.advanced-btn');
-                const advancedOptions = diagBody.querySelector('.advanced-options');
-                const clearCacheBtn = diagBody.querySelector('.clear-cache-btn');
-                const checkCorsBtn = diagBody.querySelector('.check-cors-btn');
-                const useAltApiCheck = diagBody.querySelector('#useAltApi');
-                
-                if (retryBtn) {
-                    retryBtn.addEventListener('click', async function() {
-                        // 更新按钮状态
-                        retryBtn.disabled = true;
-                        retryBtn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> 正在重试...';
-                        
-                        // 重新运行诊断
-                        try {
-                            const newResults = await diagnoseNetworkConnectivity();
-                            // 关闭当前模态框
-                            const currentModal = bootstrap.Modal.getInstance(diagModal);
-                            if (currentModal) currentModal.hide();
-                            
-                            // 再次调用处理函数，显示新结果
-                            handleNetworkError(error, operation);
-                        } catch (e) {
-                            retryBtn.disabled = false;
-                            retryBtn.innerHTML = '<i class="bi bi-arrow-repeat"></i> 重新尝试连接';
-                            showError('重试连接失败', e.message);
-                        }
-                    });
-                }
-                
-                if (advancedBtn) {
-                    advancedBtn.addEventListener('click', function() {
-                        if (advancedOptions.style.display === 'none') {
-                            advancedOptions.style.display = 'block';
-                            advancedBtn.innerHTML = '<i class="bi bi-gear-fill"></i> 隐藏高级选项';
-                        } else {
-                            advancedOptions.style.display = 'none';
-                            advancedBtn.innerHTML = '<i class="bi bi-gear"></i> 高级选项';
-                        }
-                    });
-                }
-                
-                if (clearCacheBtn) {
-                    clearCacheBtn.addEventListener('click', function() {
-                        // 清除应用本地存储缓存
-                        try {
-                            // 仅清除应用相关缓存，保留用户数据
-                            const keysToPreserve = ['easy_note_github_token', 'note_'];
-                            
-                            // 遍历本地存储，移除非笔记和非令牌的项目
-                            for (let i = 0; i < localStorage.length; i++) {
-                                const key = localStorage.key(i);
-                                let shouldPreserve = false;
-                                
-                                for (const prefix of keysToPreserve) {
-                                    if (key.startsWith(prefix)) {
-                                        shouldPreserve = true;
-                                        break;
-                                    }
-                                }
-                                
-                                if (!shouldPreserve) {
-                                    localStorage.removeItem(key);
-                                }
-                            }
-                            
-                            showDebugAlert('应用缓存已清除，刷新页面以应用更改');
-                            
-                            // 更新按钮
-                            clearCacheBtn.disabled = true;
-                            clearCacheBtn.innerHTML = '<i class="bi bi-check"></i> 缓存已清除';
-                            
-                            // 添加刷新按钮
-                            const refreshBtn = document.createElement('button');
-                            refreshBtn.className = 'btn btn-sm btn-success ms-2';
-                            refreshBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 刷新页面';
-                            refreshBtn.onclick = function() {
-                                window.location.reload();
-                            };
-                            
-                            clearCacheBtn.parentNode.appendChild(refreshBtn);
-                        } catch (e) {
-                            showError('清除缓存失败', e.message);
-                        }
-                    });
-                }
-                
-                if (checkCorsBtn) {
-                    checkCorsBtn.addEventListener('click', async function() {
-                        // CORS诊断
-                        checkCorsBtn.disabled = true;
-                        checkCorsBtn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> 正在检查...';
-                        
-                        try {
-                            // 尝试简单的CORS请求
-                            const corsResult = await fetch('https://httpbin.org/get', {
-                                method: 'GET',
-                                mode: 'cors',
-                                cache: 'no-store',
-                                credentials: 'omit'
-                            });
-                            
-                            if (corsResult.ok) {
-                                showDebugAlert('CORS请求成功！浏览器支持跨域请求。');
-                                checkCorsBtn.className = 'btn btn-sm btn-success';
-                                checkCorsBtn.innerHTML = '<i class="bi bi-check"></i> CORS正常';
-                            } else {
-                                showError('CORS测试失败', `状态码: ${corsResult.status}`);
-                                checkCorsBtn.className = 'btn btn-sm btn-danger';
-                                checkCorsBtn.innerHTML = '<i class="bi bi-x"></i> CORS异常';
-                            }
-                        } catch (e) {
-                            showError('CORS测试出错', e.message);
-                            checkCorsBtn.className = 'btn btn-sm btn-danger';
-                            checkCorsBtn.innerHTML = '<i class="bi bi-x"></i> CORS异常';
-                        }
-                    });
-                }
-                
-                if (useAltApiCheck) {
-                    // 检查是否已经使用备用API
-                    const currentApiUrl = localStorage.getItem('easy_note_alt_api');
-                    if (currentApiUrl) {
-                        useAltApiCheck.checked = true;
-                    }
-                    
-                    useAltApiCheck.addEventListener('change', function() {
-                        if (this.checked) {
-                            // 使用备用API
-                            localStorage.setItem('easy_note_alt_api', 'true');
-                            showDebugAlert('已启用备用API，刷新页面以应用更改');
-                        } else {
-                            // 使用标准API
-                            localStorage.removeItem('easy_note_alt_api');
-                            showDebugAlert('已禁用备用API，刷新页面以应用更改');
-                        }
-                        
-                        // 添加刷新按钮
-                        const refreshApiBtn = document.createElement('button');
-                        refreshApiBtn.className = 'btn btn-sm btn-success mt-2';
-                        refreshApiBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 刷新页面应用更改';
-                        refreshApiBtn.onclick = function() {
-                            window.location.reload();
-                        };
-                        
-                        // 添加到高级选项卡片底部
-                        const cardBody = useAltApiCheck.closest('.card-body');
-                        if (cardBody && !cardBody.querySelector('.btn-success')) {
-                            cardBody.appendChild(refreshApiBtn);
-                        }
-                    });
-                }
-                
-                // 显示诊断模态框
-                const bsModal = new bootstrap.Modal(diagModal);
-                bsModal.show();
-            } catch (diagError) {
-                logError('Network', '运行网络诊断时出错', diagError);
-                showError('无法完成网络诊断', diagError.message);
-            }
-        };
-        
-        // 添加重试按钮
-        const retryButton = document.createElement('button');
-        retryButton.className = 'btn btn-sm btn-primary mt-2 ms-2';
-        retryButton.innerText = '重新尝试连接';
-        retryButton.onclick = () => {
-            checkCloudConnectivity();
-            showDebugAlert('正在重新检查GitHub连接...');
-        };
-        
-        errorEl.appendChild(diagButton);
-        errorEl.appendChild(retryButton);
-    }
-    
-    return true;
-}
-
-// 增强的GitHub认证请求函数，添加重试和错误处理
-async function authenticateWithGitHub(token, maxRetries = 2) {
-    let retries = 0;
-    
-    while (retries <= maxRetries) {
-        try {
-            const headers = {
-                'Accept': 'application/vnd.github.v3+json',
-                'User-Agent': 'EasyNote-App' // 添加User-Agent头
-            };
-            
-            // 根据令牌类型使用不同的前缀
-            if (token.startsWith('github_pat_')) {
-                headers['Authorization'] = `Bearer ${token}`;
-            } else if (token.startsWith('ghp_')) {
-                headers['Authorization'] = `token ${token}`;
-            } else {
-                headers['Authorization'] = `token ${token}`;
-            }
-            
-            const options = {
-                method: 'GET',
-                headers: headers,
-                credentials: 'omit',
-                mode: 'cors',
-                cache: 'no-store'
-            };
-            
-            logInfo('Auth', `尝试认证GitHub (尝试 ${retries + 1}/${maxRetries + 1})`);
-            const response = await fetch(`${API_BASE_URL}/user`, options);
-            
-            if (response.ok) {
-                const userData = await response.json();
-                logInfo('Auth', `认证成功，用户: ${userData.login}`);
-                return {
-                    success: true,
-                    user: userData,
-                    message: `认证成功，欢迎 ${userData.login}`
-                };
-            } else {
-                let errorText = await response.text();
-                try {
-                    const errorJson = JSON.parse(errorText);
-                    if (errorJson.message) {
-                        errorText = errorJson.message;
-                    }
-                } catch(e) {
-                    // 如果不是JSON，保持原文本
-                }
-                
-                logError('Auth', `认证失败: HTTP ${response.status}`, errorText);
-                
-                if (response.status === 401) {
-                    // 令牌无效，无需重试
-                    return {
-                        success: false,
-                        error: `认证失败: 令牌无效或已过期 (HTTP ${response.status})`,
-                        detail: errorText
-                    };
-                } else if (response.status === 403) {
-                    // 可能是速率限制
-                    if (errorText.includes('rate limit')) {
-                        const resetTime = response.headers.get('X-RateLimit-Reset');
-                        const waitTime = resetTime ? new Date(resetTime * 1000) : '未知时间';
-                        
-                        return {
-                            success: false,
-                            error: `认证失败: 速率限制 (HTTP ${response.status})`,
-                            detail: `您已超出GitHub API速率限制。限制将在${waitTime}后重置。`
-                        };
-                    } else {
-                        return {
-                            success: false,
-                            error: `认证失败: 权限问题 (HTTP ${response.status})`,
-                            detail: errorText
-                        };
-                    }
-                }
-                
-                // 其他错误，尝试重试
-                retries++;
-                if (retries <= maxRetries) {
-                    // 在重试前等待
-                    const waitTime = Math.pow(2, retries) * 1000; // 指数退避
-                    logInfo('Auth', `等待${waitTime}ms后重试...`);
-                    await new Promise(resolve => setTimeout(resolve, waitTime));
-                } else {
-                    return {
-                        success: false,
-                        error: `认证失败: HTTP ${response.status}`,
-                        detail: errorText
-                    };
-                }
-            }
-        } catch (error) {
-            logError('Auth', `认证请求出错 (尝试 ${retries + 1}/${maxRetries + 1})`, error);
-            
-            // 检查是否是Failed to fetch错误
-            if (error.message && error.message.includes('Failed to fetch')) {
-                logError('Auth', '遇到"Failed to fetch"错误，这通常是由网络或CORS问题引起的');
-                
-                // 如果已经是最后一次重试，直接返回特殊错误代码
-                if (retries === maxRetries) {
-                    // 提供更详细的错误信息
-                    return {
-                        success: false,
-                        error: '认证请求出错: Failed to fetch',
-                        detail: '浏览器无法完成网络请求，可能是由网络连接问题或CORS限制引起的。',
-                        isFailedToFetch: true // 添加特殊标记
-                    };
-                }
-            }
-            
-            // 网络错误，尝试重试
-            retries++;
-            if (retries <= maxRetries) {
-                // 在重试前等待
-                const waitTime = Math.pow(2, retries) * 1000; // 指数退避
-                logInfo('Auth', `等待${waitTime}ms后重试...`);
-                await new Promise(resolve => setTimeout(resolve, waitTime));
-            } else {
-                return {
-                    success: false,
-                    error: '认证请求出错: 网络连接问题',
-                    detail: error.message,
-                    isNetworkError: true
-                };
-            }
-        }
-    }
-    
-    // 如果所有重试都失败
-    return {
-        success: false,
-        error: '认证失败: 多次尝试后仍然失败',
-        detail: '请检查您的网络连接和令牌有效性'
-    };
-}
-
-// 修改checkCloudConnectivity使用增强的认证函数
-async function checkCloudConnectivity() {
-    logInfo('Cloud', '检查GitHub连接...');
-    
-    if (!GITHUB_TOKEN) {
-        logError('Cloud', 'GitHub令牌未设置，无法检查连接');
-        isCloudSyncEnabled = false;
-        updateSyncStatus(false);
-        return false;
-    }
-    
-    try {
-        syncStatusEl.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> 正在检查GitHub连接...';
-        
-        const authResult = await authenticateWithGitHub(GITHUB_TOKEN);
-        
-        if (authResult.success) {
-            logInfo('Cloud', `GitHub云存储连接成功! 用户: ${authResult.user.login}`);
-            isCloudSyncEnabled = true;
-            updateSyncStatus(true);
-            return true;
-        } else {
-            logError('Cloud', `GitHub连接检查失败: ${authResult.error}`, authResult.detail);
-            
-            // 处理不同类型的错误
-            if (authResult.isFailedToFetch) {
-                // Failed to fetch错误需要特殊处理
-                handleFailedToFetchError();
-            } else if (authResult.isNetworkError) {
-                // 网络错误
-                handleNetworkError(new Error(authResult.detail), "检查GitHub连接");
-            } else if (authResult.error.includes('令牌无效') || authResult.error.includes('401')) {
-                // 令牌问题
-                handleGitHubPermissionIssue("GitHub令牌无效或已过期");
-            } else if (authResult.error.includes('权限问题') || authResult.error.includes('403')) {
-                // 权限问题
-                handleGitHubPermissionIssue("GitHub令牌权限不足");
-            } else if (authResult.error.includes('速率限制')) {
-                // 速率限制
-                showError(`GitHub API速率限制`, authResult.detail);
-            } else {
-                // 其他错误
-                showError(`GitHub连接失败: ${authResult.error}`, authResult.detail);
-            }
-            
-            isCloudSyncEnabled = false;
-            updateSyncStatus(false);
-            return false;
-        }
-    } catch (error) {
-        logError('Cloud', 'GitHub连接检查过程中出错', error);
-        
-        // 处理网络错误
-        if (error.message.includes('Failed to fetch')) {
-            // 特殊处理Failed to fetch错误
-            handleFailedToFetchError();
-        } else if (error.message.includes('fetch') || error.message.includes('network') || 
-            error.name === 'TypeError' || error.name === 'NetworkError') {
-            handleNetworkError(error, "检查GitHub连接");
-        } else {
-            showError('连接GitHub时出错', error.message);
-        }
-        
-        isCloudSyncEnabled = false;
-        updateSyncStatus(false);
-        return false;
-    }
-}
-
-// 专门处理Failed to fetch错误
-async function handleFailedToFetchError() {
-    logError('Network', '"Failed to fetch"错误 - 无法完成网络请求');
-    
-    // 创建诊断结果模态框
-    const diagModal = createDiagResultModal();
-    const diagBody = diagModal.querySelector('.modal-body');
-    
-    // 构建诊断结果内容
-    diagBody.innerHTML = `
-        <h5>网络请求错误</h5>
-        <div class="alert alert-danger">
-            <i class="bi bi-wifi-off"></i> <strong>网络请求失败</strong><br>
-            浏览器无法完成网络请求，这通常是由以下原因导致的:<br>
-            <hr>
-            <div class="mt-2">
-                <strong>可能的原因:</strong><br>
-                1. <strong>跨域资源共享(CORS)限制</strong> - 浏览器安全策略阻止了请求<br>
-                2. <strong>网络连接问题</strong> - 网络连接不稳定或已断开<br>
-                3. <strong>浏览器扩展干扰</strong> - 某些隐私或安全扩展可能阻止了请求<br>
-                4. <strong>混合内容问题</strong> - 尝试从HTTPS页面请求HTTP内容<br>
-                5. <strong>目标服务器不可用</strong> - GitHub API可能暂时不可用<br>
-            </div>
-            <hr>
-            <div class="mt-2">
-                <strong>建议解决方案:</strong><br>
-                1. <strong>启用备用API</strong> - 点击下方"高级选项"使用备用API<br>
-                2. <strong>检查网络连接</strong> - 确保您的设备已连接到互联网<br>
-                3. <strong>使用无痕/隐私浏览模式</strong> - 这将禁用所有扩展<br>
-                4. <strong>暂时关闭浏览器扩展</strong> - 特别是内容拦截器和隐私扩展<br>
-                5. <strong>清除浏览器缓存和Cookie</strong> - 解决潜在的数据损坏问题<br>
-                6. <strong>使用不同的浏览器</strong> - 尝试Chrome、Firefox或Edge<br>
-            </div>
-        </div>
-        <div class="mt-3 text-center">
-            <button class="btn btn-primary retry-btn me-2">
-                <i class="bi bi-arrow-repeat"></i> 重新尝试连接
-            </button>
-            <button class="btn btn-secondary advanced-btn">
-                <i class="bi bi-gear"></i> 高级选项
-            </button>
-        </div>
-        <div class="mt-3 advanced-options" style="display:none;">
-            <div class="card">
-                <div class="card-header bg-light">
-                    <strong>高级选项</strong>
-                </div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="useAltApi">
-                            <label class="form-check-label" for="useAltApi">
-                                <strong>使用备用API</strong> (推荐)
-                            </label>
-                            <div class="small text-muted">
-                                绕过GitHub API限制，使用备用服务器
-                            </div>
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="forceLocalStorage">
-                            <label class="form-check-label" for="forceLocalStorage">
-                                <strong>强制使用本地存储</strong>
-                            </label>
-                            <div class="small text-muted">
-                                暂时关闭云同步，仅使用浏览器本地存储
-                            </div>
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <button class="btn btn-sm btn-outline-secondary clear-cache-btn">
-                            <i class="bi bi-trash"></i> 清除应用缓存
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary ms-2 check-cors-btn">
-                            <i class="bi bi-shield-check"></i> CORS诊断
-                        </button>
-                    </div>
-                    <hr>
-                    <div class="mb-2">
-                        <strong>测试基本网络连接:</strong>
-                    </div>
-                    <div>
-                        <button class="btn btn-sm btn-outline-primary test-httpbin-btn">
-                            测试普通HTTP请求
-                        </button>
-                        <button class="btn btn-sm btn-outline-primary ms-2 test-github-btn">
-                            测试GitHub连接
-                        </button>
-                    </div>
-                    <div class="small text-muted mt-2">
-                        请注意: 高级选项适用于技术用户，可能需要重新加载应用才能生效。
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    // 添加事件处理程序
-    const retryBtn = diagBody.querySelector('.retry-btn');
-    const advancedBtn = diagBody.querySelector('.advanced-btn');
-    const advancedOptions = diagBody.querySelector('.advanced-options');
-    const clearCacheBtn = diagBody.querySelector('.clear-cache-btn');
-    const checkCorsBtn = diagBody.querySelector('.check-cors-btn');
-    const useAltApiCheck = diagBody.querySelector('#useAltApi');
-    const forceLocalStorageCheck = diagBody.querySelector('#forceLocalStorage');
-    const testHttpbinBtn = diagBody.querySelector('.test-httpbin-btn');
-    const testGithubBtn = diagBody.querySelector('.test-github-btn');
-    
-    // 检查当前状态并设置相应选项
-    if (localStorage.getItem('easy_note_alt_api') === 'true') {
-        useAltApiCheck.checked = true;
-    }
-    
-    if (localStorage.getItem('easy_note_storage_setting') === 'local') {
-        forceLocalStorageCheck.checked = true;
-    }
-    
-    // 重试按钮事件
-    if (retryBtn) {
-        retryBtn.addEventListener('click', function() {
-            // 关闭当前模态框
-            const currentModal = bootstrap.Modal.getInstance(diagModal);
-            if (currentModal) currentModal.hide();
-            
-            // 重新检查连接
-            checkCloudConnectivity();
-            showDebugAlert('正在重新检查GitHub连接...');
-        });
-    }
-    
-    // 高级选项按钮事件
-    if (advancedBtn) {
-        advancedBtn.addEventListener('click', function() {
-            if (advancedOptions.style.display === 'none') {
-                advancedOptions.style.display = 'block';
-                advancedBtn.innerHTML = '<i class="bi bi-gear-fill"></i> 隐藏高级选项';
-            } else {
-                advancedOptions.style.display = 'none';
-                advancedBtn.innerHTML = '<i class="bi bi-gear"></i> 高级选项';
-            }
-        });
-    }
-    
-    // 清除缓存按钮事件
-    if (clearCacheBtn) {
-        clearCacheBtn.addEventListener('click', function() {
-            try {
-                // 仅清除应用相关缓存，保留用户数据
-                const keysToPreserve = ['easy_note_github_token', 'note_'];
-                
-                // 遍历本地存储，移除非笔记和非令牌的项目
-                for (let i = 0; i < localStorage.length; i++) {
-                    const key = localStorage.key(i);
-                    let shouldPreserve = false;
-                    
-                    for (const prefix of keysToPreserve) {
-                        if (key.startsWith(prefix)) {
-                            shouldPreserve = true;
-                            break;
-                        }
-                    }
-                    
-                    if (!shouldPreserve) {
-                        localStorage.removeItem(key);
-                    }
-                }
-                
-                showDebugAlert('应用缓存已清除');
-                
-                // 更新按钮
-                clearCacheBtn.disabled = true;
-                clearCacheBtn.innerHTML = '<i class="bi bi-check"></i> 缓存已清除';
-                
-                // 添加刷新按钮
-                const refreshBtn = document.createElement('button');
-                refreshBtn.className = 'btn btn-sm btn-success ms-2';
-                refreshBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 刷新页面';
-                refreshBtn.onclick = function() {
-                    window.location.reload();
-                };
-                
-                clearCacheBtn.parentNode.appendChild(refreshBtn);
-            } catch (e) {
-                showError('清除缓存失败', e.message);
-            }
-        });
-    }
-    
-    // CORS诊断按钮事件
-    if (checkCorsBtn) {
-        checkCorsBtn.addEventListener('click', async function() {
-            checkCorsBtn.disabled = true;
-            checkCorsBtn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> 正在检查...';
-            
-            try {
-                const corsResult = await fetch('https://httpbin.org/get', {
-                    method: 'GET',
-                    mode: 'cors',
-                    cache: 'no-store',
-                    credentials: 'omit'
-                });
-                
-                if (corsResult.ok) {
-                    showDebugAlert('CORS请求成功！浏览器支持跨域请求。');
-                    checkCorsBtn.className = 'btn btn-sm btn-success';
-                    checkCorsBtn.innerHTML = '<i class="bi bi-check"></i> CORS正常';
-                } else {
-                    showError('CORS测试失败', `状态码: ${corsResult.status}`);
-                    checkCorsBtn.className = 'btn btn-sm btn-danger';
-                    checkCorsBtn.innerHTML = '<i class="bi bi-x"></i> CORS异常';
-                }
-            } catch (e) {
-                showError('CORS测试出错', e.message);
-                checkCorsBtn.className = 'btn btn-sm btn-danger';
-                checkCorsBtn.innerHTML = '<i class="bi bi-x"></i> CORS异常';
-                
-                // 如果是Failed to fetch，给出更具体的提示
-                if (e.message.includes('Failed to fetch')) {
-                    showDebugAlert('CORS测试失败：浏览器无法完成网络请求。建议使用备用API或检查网络连接。');
-                }
-            }
-        });
-    }
-    
-    // 备用API开关事件
-    if (useAltApiCheck) {
-        useAltApiCheck.addEventListener('change', function() {
-            if (this.checked) {
-                localStorage.setItem('easy_note_alt_api', 'true');
-                showDebugAlert('已启用备用API');
-            } else {
-                localStorage.removeItem('easy_note_alt_api');
-                showDebugAlert('已禁用备用API');
-            }
-            
-            // 添加刷新按钮
-            const refreshApiBtn = document.createElement('button');
-            refreshApiBtn.className = 'btn btn-sm btn-success mt-2';
-            refreshApiBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 刷新页面应用更改';
-            refreshApiBtn.onclick = function() {
-                window.location.reload();
-            };
-            
-            // 添加到卡片底部
-            const cardBody = useAltApiCheck.closest('.card-body');
-            if (cardBody && !cardBody.querySelector('.btn-success')) {
-                cardBody.appendChild(refreshApiBtn);
-            }
-        });
-    }
-    
-    // 强制本地存储开关事件
-    if (forceLocalStorageCheck) {
-        forceLocalStorageCheck.addEventListener('change', function() {
-            if (this.checked) {
-                localStorage.setItem('easy_note_storage_setting', 'local');
-                showDebugAlert('已启用仅本地存储模式');
-            } else {
-                localStorage.setItem('easy_note_storage_setting', 'cloud');
-                showDebugAlert('已启用云同步模式');
-            }
-            
-            // 添加刷新按钮
-            const refreshStorageBtn = document.createElement('button');
-            refreshStorageBtn.className = 'btn btn-sm btn-success mt-2';
-            refreshStorageBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 刷新页面应用更改';
-            refreshStorageBtn.onclick = function() {
-                window.location.reload();
-            };
-            
-            // 添加到卡片底部
-            const cardBody = forceLocalStorageCheck.closest('.card-body');
-            if (cardBody && !cardBody.querySelector('.btn-success')) {
-                cardBody.appendChild(refreshStorageBtn);
-            }
-
-            // 强制使用云存储模式
-            localStorage.setItem('easy_note_cloud_sync', 'true');
-            localStorage.setItem('easy_note_storage_setting', 'github');
-            
-            // 输出当前设置
-            logInfo('Storage', '已将存储设置为云模式', {
-                cloudSync: localStorage.getItem('easy_note_cloud_sync'),
-                storageSetting: localStorage.getItem('easy_note_storage_setting')
-            });
-        });
-    }
-    
-    // 测试普通HTTP请求按钮事件
-    if (testHttpbinBtn) {
-        testHttpbinBtn.addEventListener('click', async function() {
-            testHttpbinBtn.disabled = true;
-            testHttpbinBtn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> 测试中...';
-            
-            try {
-                const startTime = Date.now();
-                const response = await fetch('https://httpbin.org/get', {
-                    method: 'GET',
-                    cache: 'no-store'
-                });
-                const endTime = Date.now();
-                const responseTime = endTime - startTime;
-                
-                if (response.ok) {
-                    testHttpbinBtn.className = 'btn btn-sm btn-success';
-                    testHttpbinBtn.innerHTML = `<i class="bi bi-check"></i> 连接正常 (${responseTime}ms)`;
-                    showDebugAlert(`HTTP请求测试成功，响应时间: ${responseTime}ms`);
-                } else {
-                    testHttpbinBtn.className = 'btn btn-sm btn-danger';
-                    testHttpbinBtn.innerHTML = `<i class="bi bi-x"></i> 连接失败 (${response.status})`;
-                    showError('HTTP请求测试失败', `状态码: ${response.status}`);
-                }
-            } catch (e) {
-                testHttpbinBtn.className = 'btn btn-sm btn-danger';
-                testHttpbinBtn.innerHTML = '<i class="bi bi-x"></i> 连接失败';
-                showError('HTTP请求测试出错', e.message);
-            }
-        });
-    }
-    
-    // 测试GitHub连接按钮事件
-    if (testGithubBtn) {
-        testGithubBtn.addEventListener('click', async function() {
-            testGithubBtn.disabled = true;
-            testGithubBtn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> 测试中...';
-            
-            try {
-                const startTime = Date.now();
-                const response = await fetch('https://github.com', {
-                    method: 'GET',
-                    cache: 'no-store'
-                });
-                const endTime = Date.now();
-                const responseTime = endTime - startTime;
-                
-                if (response.ok) {
-                    testGithubBtn.className = 'btn btn-sm btn-success';
-                    testGithubBtn.innerHTML = `<i class="bi bi-check"></i> 连接正常 (${responseTime}ms)`;
-                    showDebugAlert(`GitHub连接测试成功，响应时间: ${responseTime}ms`);
-                } else {
-                    testGithubBtn.className = 'btn btn-sm btn-danger';
-                    testGithubBtn.innerHTML = `<i class="bi bi-x"></i> 连接失败 (${response.status})`;
-                    showError('GitHub连接测试失败', `状态码: ${response.status}`);
-                }
-            } catch (e) {
-                testGithubBtn.className = 'btn btn-sm btn-danger';
-                testGithubBtn.innerHTML = '<i class="bi bi-x"></i> 连接失败';
-                showError('GitHub连接测试出错', e.message);
-            }
-        });
-    }
-    
-    // 显示诊断模态框
-    const bsModal = new bootstrap.Modal(diagModal);
-    bsModal.show();
 }
 
 // 验证GitHub令牌函数
@@ -3984,22 +2330,78 @@ function maskToken(token) {
     return `${start}...${end}`;
 }
 
-// 修改populateSettingsModal函数
+// 填充设置模态框内容
 function populateSettingsModal() {
-    // 填充GitHub令牌
-    const tokenField = document.getElementById('githubTokenField');
-    tokenField.value = GITHUB_TOKEN || '';
-    
-    // 填充云存储选项
-    document.getElementById('useGitHub').checked = isCloudStorageEnabled();
-    document.getElementById('useLocalOnly').checked = !isCloudStorageEnabled();
-    
-    // 显示已保存的笔记ID
-    if (currentNoteId) {
-        document.getElementById('currentNoteIdValue').textContent = currentNoteId;
-        document.getElementById('currentNoteIdContainer').classList.remove('d-none');
-    } else {
-        document.getElementById('currentNoteIdContainer').classList.add('d-none');
+    try {
+        logInfo('UI', '填充设置模态框内容');
+        
+        // 获取容器
+        const cloudStatusDetails = document.getElementById('cloudStatusDetails');
+        if (!cloudStatusDetails) {
+            logError('UI', '找不到cloudStatusDetails容器');
+            return;
+        }
+        
+        // 检查是否已有OAuth令牌
+        if (window.GitHubOAuth && GitHubOAuth.hasValidOAuthToken()) {
+            cloudStatusDetails.innerHTML = `
+                <div class="alert alert-warning">
+                    <h5><i class="bi bi-cloud"></i> 云同步已授权但未启用</h5>
+                    <p>您已通过GitHub授权，但云同步功能未启用。</p>
+                    <div class="form-check form-switch mt-3">
+                        <input class="form-check-input" type="checkbox" id="cloudSyncToggle">
+                        <label class="form-check-label" for="cloudSyncToggle">启用云同步</label>
+                    </div>
+                </div>
+            `;
+            
+            // 设置开关状态
+            setTimeout(() => {
+                const toggle = document.getElementById('cloudSyncToggle');
+                if (toggle) {
+                    toggle.checked = localStorage.getItem('easy_note_cloud_sync') === 'true';
+                    
+                    // 添加事件监听器
+                    toggle.addEventListener('change', function() {
+                        localStorage.setItem('easy_note_cloud_sync', this.checked ? 'true' : 'false');
+                        logInfo('Settings', `云同步设置已更改: ${this.checked ? '启用' : '禁用'}`);
+                        
+                        // 更新UI
+                        updateSyncStatus();
+                        
+                        // 显示通知
+                        showDebugAlert(`云同步已${this.checked ? '启用' : '禁用'}`);
+                    });
+                }
+            }, 100);
+        } else {
+            // 未授权，显示GitHub授权选项
+            cloudStatusDetails.innerHTML = `
+                <div class="alert alert-info">
+                    <h5><i class="bi bi-cloud-upload"></i> 设置云同步</h5>
+                    <p>云同步功能允许您在不同设备之间同步笔记内容。笔记内容将安全地存储在您的GitHub账户中。</p>
+                    <button id="startGitHubAuthBtn" class="btn btn-primary mt-2">
+                        <i class="bi bi-github"></i> 使用GitHub授权
+                    </button>
+                    
+                    <div class="mt-3 small text-muted">
+                        <p><strong>隐私说明:</strong> 所有数据都存储在您自己的GitHub账号中，我们不会获取或存储您的数据。授权仅用于访问Gist API。</p>
+                    </div>
+                </div>
+            `;
+            
+            // 添加授权按钮事件
+            setTimeout(() => {
+                const authBtn = document.getElementById('startGitHubAuthBtn');
+                if (authBtn) {
+                    authBtn.addEventListener('click', function() {
+                        GitHubOAuth.requestGitHubAuthorization();
+                    });
+                }
+            }, 100);
+        }
+    } catch (error) {
+        logError('UI', '填充设置模态框出错', error);
     }
 }
 
@@ -4058,4 +2460,36 @@ function isCloudStorageEnabled() {
     }
     
     return cloudEnabled;
+}
+
+// 更新同步状态显示
+function updateSyncStatus(isConnected = null) {
+    if (!syncStatusEl) return;
+    
+    try {
+        // 检查是否启用云同步
+        if (window.CloudStorage && window.GitHubOAuth && CloudStorage.isEnabled() && GitHubOAuth.hasValidOAuthToken()) {
+            // 如果未指定连接状态，默认为已连接
+            if (isConnected === null || isConnected === true) {
+                syncStatusEl.innerHTML = '<i class="bi bi-cloud-check"></i> 云同步已启用';
+                syncStatusEl.classList.remove('text-warning', 'text-danger');
+                syncStatusEl.classList.add('text-success');
+                syncStatusEl.title = '点击查看云同步状态';
+            } else {
+                // 有连接问题
+                syncStatusEl.innerHTML = '<i class="bi bi-cloud-slash"></i> 云同步连接错误';
+                syncStatusEl.classList.remove('text-success');
+                syncStatusEl.classList.add('text-danger');
+                syncStatusEl.title = '点击尝试重新连接';
+            }
+        } else {
+            // 未启用云同步
+            syncStatusEl.innerHTML = '<i class="bi bi-cloud-slash"></i> 本地模式';
+            syncStatusEl.classList.remove('text-success', 'text-danger');
+            syncStatusEl.classList.add('text-warning');
+            syncStatusEl.title = '点击设置云同步';
+        }
+    } catch (error) {
+        logError('UI', '更新同步状态显示失败', error);
+    }
 }

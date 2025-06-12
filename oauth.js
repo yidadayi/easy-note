@@ -1,134 +1,223 @@
-// GitHub OAuth认证处理模块
-const OAUTH_CLIENT_ID = 'Iv23liDeLHkmwxBvkX1m'; // 用户需要设置自己的GitHub OAuth应用Client ID
-// 只使用基础URL作为重定向URI，忽略任何查询参数
-const REDIRECT_URI = window.location.origin + window.location.pathname; // 例如 https://bespoke-biscuit-d9ca19.netlify.app
+// GitHub OAuth 认证处理模块
+// 处理GitHub OAuth流程和令牌管理
+
+// 配置
+const OAUTH_CLIENT_ID = '9b6a80ea2912175c54b0';
 const OAUTH_SCOPE = 'gist';
-const STORAGE_KEY_TOKEN = 'easy_note_oauth_token';
-const STORAGE_KEY_STATE = 'easy_note_oauth_state';
+const OAUTH_STORAGE_KEY = 'easy_note_oauth_token';
+const OAUTH_STATE_KEY = 'easy_note_oauth_state';
+const OAUTH_NOTE_ID_KEY = 'easy_note_oauth_return_note_id';
+const OAUTH_NETLIFY_FUNCTION = '/.netlify/functions/github-oauth';
 
-// 生成随机状态值防止CSRF攻击
-function generateRandomState() {
-    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-}
-
-// 初始化OAuth流程
-function initiateOAuthFlow() {
-    // 检查是否配置了Client ID
-    if (!OAUTH_CLIENT_ID) {
-        alert('错误: 尚未配置GitHub OAuth应用。请参照OAUTH-SETUP.md文件设置您的OAuth应用，并在oauth.js中更新OAUTH_CLIENT_ID。');
-        console.error('OAuth配置错误: 未设置OAUTH_CLIENT_ID');
-        return;
-    }
-    
-    // 保存当前笔记ID以便授权后返回
-    const urlParams = new URLSearchParams(window.location.search);
-    const currentNoteId = urlParams.get('id');
-    if (currentNoteId) {
-        localStorage.setItem('easy_note_current_id', currentNoteId);
-    }
-    
-    // 生成并保存状态值
-    const state = generateRandomState();
-    localStorage.setItem(STORAGE_KEY_STATE, state);
-    
-    // 构建授权URL
-    const authUrl = `https://github.com/login/oauth/authorize?` +
-        `client_id=${OAUTH_CLIENT_ID}&` +
-        `redirect_uri=${encodeURIComponent(REDIRECT_URI)}&` +
-        `scope=${OAUTH_SCOPE}&` +
-        `state=${state}`;
-    
-    // 跳转到GitHub授权页面
-    window.location.href = authUrl;
-}
-
-// 检查是否有可用的OAuth令牌
-function hasValidOAuthToken() {
-    return !!localStorage.getItem(STORAGE_KEY_TOKEN);
-}
-
-// 获取OAuth令牌
-function getOAuthToken() {
-    return localStorage.getItem(STORAGE_KEY_TOKEN);
-}
-
-// 清除OAuth令牌
-function clearOAuthToken() {
-    localStorage.removeItem(STORAGE_KEY_TOKEN);
-}
-
-// 处理GitHub OAuth回调
-async function handleOAuthCallback() {
-    // 解析URL参数
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
-    const state = urlParams.get('state');
-    const storedState = localStorage.getItem(STORAGE_KEY_STATE);
-    
-    // 如果没有code参数，则不是OAuth回调
-    if (!code) {
-        return null;
-    }
-    
-    // 验证状态以防CSRF攻击
-    if (state !== storedState) {
-        console.error('OAuth状态不匹配，可能存在CSRF攻击');
-        alert('安全警告：OAuth状态验证失败，授权过程被中止。请重新尝试授权。');
-        return null;
-    }
-    
-    // 清除状态值
-    localStorage.removeItem(STORAGE_KEY_STATE);
-    
-    try {
-        // 检查是否设置了代理URL
-        if (!OAUTH_CLIENT_ID) {
-            console.error('OAuth配置错误: 未设置OAUTH_CLIENT_ID，无法完成授权流程');
-            alert('错误：未正确配置OAuth应用。请参照OAUTH-SETUP.md文件完成设置。');
-            return null;
-        }
-        
-        // 使用代理服务交换令牌
-        // 注意：由于GitHub OAuth不允许前端直接交换令牌，我们需要使用后端代理
-        // 这里使用我们在本仓库中部署的Netlify Functions
-        const tokenUrl = `/.netlify/functions/github-oauth?code=${code}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
-        
-        const response = await fetch(tokenUrl);
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`令牌交换失败: ${response.status} - ${errorText}`);
-        }
-        
-        const data = await response.json();
-        if (data.error) {
-            throw new Error(`认证错误: ${data.error_description || data.error}`);
-        }
-        
-        // 保存令牌
-        localStorage.setItem(STORAGE_KEY_TOKEN, data.access_token);
-        
-        // 恢复之前的笔记ID（如果有）
-        const savedNoteId = localStorage.getItem('easy_note_current_id');
-        let targetUrl = window.location.origin + window.location.pathname;
-        if (savedNoteId) {
-            targetUrl += `?id=${savedNoteId}`;
-            localStorage.removeItem('easy_note_current_id'); // 使用后清除
-        }
-        window.history.replaceState({}, document.title, targetUrl);
-        
-        return data.access_token;
-    } catch (error) {
-        console.error('获取OAuth令牌时出错:', error);
-        alert(`GitHub授权过程中出错: ${error.message}\n请检查您的OAuth配置或网络连接。`);
-        return null;
-    }
-}
-
-// 导出OAuth模块
+// 公开API
 const GitHubOAuth = {
-    initiateOAuthFlow,
-    handleOAuthCallback,
-    hasValidOAuthToken,
-    getOAuthToken,
-    clearOAuthToken
-}; 
+    /**
+     * 初始化OAuth处理
+     */
+    initialize: function() {
+        console.log('[GitHubOAuth] 初始化');
+        
+        // 检查URL是否含有授权码
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        const state = urlParams.get('state');
+        
+        if (code && state) {
+            // 有授权码，进行认证流程
+            console.log('[GitHubOAuth] 检测到授权码，处理认证');
+            this.handleAuthCode(code, state);
+            return true; // 正在处理授权
+        }
+        
+        return false; // 无需处理授权
+    },
+    
+    /**
+     * 请求GitHub授权
+     */
+    requestGitHubAuthorization: function() {
+        console.log('[GitHubOAuth] 请求GitHub授权');
+        
+        // 保存当前笔记ID，用于授权后返回
+        if (window.currentNoteId) {
+            localStorage.setItem(OAUTH_NOTE_ID_KEY, window.currentNoteId);
+        }
+        
+        // 生成随机state
+        const state = this.generateRandomState();
+        localStorage.setItem(OAUTH_STATE_KEY, state);
+        
+        // 构建授权URL
+        const redirectUri = encodeURIComponent(window.location.origin);
+        const authUrl = `https://github.com/login/oauth/authorize?client_id=${OAUTH_CLIENT_ID}&redirect_uri=${redirectUri}&scope=${OAUTH_SCOPE}&state=${state}`;
+        
+        // 跳转到授权页面
+        window.location.href = authUrl;
+    },
+    
+    /**
+     * 处理授权码
+     */
+    handleAuthCode: async function(code, state) {
+        console.log('[GitHubOAuth] 处理授权码');
+        
+        // 验证state参数
+        const savedState = localStorage.getItem(OAUTH_STATE_KEY);
+        if (state !== savedState) {
+            console.error('[GitHubOAuth] 状态参数不匹配，可能是CSRF攻击');
+            window.alert('认证失败：状态参数不匹配');
+            return;
+        }
+        
+        // 清除state
+        localStorage.removeItem(OAUTH_STATE_KEY);
+        
+        try {
+            // 使用Netlify函数交换令牌
+            const exchangeUrl = `${OAUTH_NETLIFY_FUNCTION}?code=${code}&state=${state}`;
+            console.log(`[GitHubOAuth] 交换令牌: ${exchangeUrl}`);
+            
+            const response = await fetch(exchangeUrl, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`交换令牌失败: ${response.status} ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            console.log('[GitHubOAuth] 令牌交换成功');
+            
+            if (data.error) {
+                throw new Error(`交换令牌错误: ${data.error}`);
+            }
+            
+            if (!data.access_token) {
+                throw new Error('返回数据中没有访问令牌');
+            }
+            
+            // 保存令牌
+            this.saveToken(data.access_token);
+            
+            // 尝试验证令牌
+            const validationResult = await this.validateToken();
+            if (!validationResult.valid) {
+                throw new Error(`令牌验证失败: ${validationResult.error}`);
+            }
+            
+            console.log('[GitHubOAuth] 授权完成，令牌已验证');
+            
+            // 通知 CloudStorage 模块令牌已更新
+            if (window.CloudStorage) {
+                CloudStorage.setToken(data.access_token);
+            }
+            
+            // 恢复笔记ID并重定向
+            const noteId = localStorage.getItem(OAUTH_NOTE_ID_KEY);
+            localStorage.removeItem(OAUTH_NOTE_ID_KEY);
+            
+            // 重定向到原始笔记页面
+            const baseUrl = window.location.origin + window.location.pathname;
+            if (noteId) {
+                window.location.href = `${baseUrl}?id=${noteId}`;
+            } else {
+                window.location.href = baseUrl;
+            }
+            
+            return true;
+        } catch (error) {
+            console.error('[GitHubOAuth] 授权处理错误:', error);
+            window.alert(`GitHub认证失败: ${error.message}\n请重试或联系管理员。`);
+            return false;
+        }
+    },
+    
+    /**
+     * 验证OAuth令牌
+     */
+    validateToken: async function() {
+        const token = this.getToken();
+        
+        if (!token) {
+            return {
+                valid: false,
+                error: '无令牌'
+            };
+        }
+        
+        try {
+            const response = await fetch('https://gh-api.onrender.com/api/v3/user', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+            
+            if (!response.ok) {
+                return {
+                    valid: false,
+                    error: `HTTP错误: ${response.status}`
+                };
+            }
+            
+            const data = await response.json();
+            return {
+                valid: true,
+                username: data.login
+            };
+        } catch (error) {
+            console.error('[GitHubOAuth] 验证令牌错误:', error);
+            return {
+                valid: false,
+                error: error.message
+            };
+        }
+    },
+    
+    /**
+     * 获取OAuth令牌
+     */
+    getToken: function() {
+        return localStorage.getItem(OAUTH_STORAGE_KEY);
+    },
+    
+    /**
+     * 保存OAuth令牌
+     */
+    saveToken: function(token) {
+        // 将令牌保存到本地
+        localStorage.setItem(OAUTH_STORAGE_KEY, token);
+        
+        // 同时启用云同步设置
+        localStorage.setItem('easy_note_cloud_sync', 'true');
+    },
+    
+    /**
+     * 清除OAuth令牌
+     */
+    clearToken: function() {
+        localStorage.removeItem(OAUTH_STORAGE_KEY);
+    },
+    
+    /**
+     * 检查是否有有效的OAuth令牌
+     */
+    hasValidOAuthToken: function() {
+        return !!this.getToken();
+    },
+    
+    /**
+     * 生成随机state参数(防CSRF)
+     */
+    generateRandomState: function() {
+        return Math.random().toString(36).substring(2, 15) + 
+               Math.random().toString(36).substring(2, 15);
+    }
+};
+
+// 导出模块
+window.GitHubOAuth = GitHubOAuth; 
