@@ -768,6 +768,22 @@ function handleSaveStorageOptions() {
             isCloudSyncEnabled = false;
             localStorage.setItem('easy_note_storage_setting', 'local');
             logInfo('Storage', '已设置为仅本地存储模式');
+        } else if (selectedOption.value === 'firebase') {
+            // 使用 Firebase 存储
+            logInfo('Storage', '用户选择了 Firebase 存储');
+            
+            // 如果 FirebaseIntegration 模块存在，则使用它处理选择
+            if (window.FirebaseIntegration) {
+                const result = FirebaseIntegration.handleStorageSelection('firebase');
+                if (result) {
+                    forceLocalOnly = false;
+                    isCloudSyncEnabled = true;
+                    logInfo('Storage', '已设置为 Firebase 存储模式');
+                }
+            } else {
+                logError('Storage', 'Firebase 集成模块未加载');
+                alert('Firebase 集成模块未加载，请确保已引入相关脚本');
+            }
         } else if (selectedOption.value === 'github') {
             forceLocalOnly = false;
             localStorage.setItem('easy_note_storage_setting', 'github');
@@ -2248,6 +2264,9 @@ function init() {
             }
         }, 30000); // 30秒自动保存
         
+        // 初始化存储提供商
+        initializeStorageProvider();
+        
         // 检查GitHub OAuth回调
         if (window.GitHubOAuth && GitHubOAuth.initialize()) {
             // OAuth处理中，等待完成
@@ -2279,6 +2298,23 @@ function init() {
     } catch (error) {
         logError('Init', '应用初始化失败', error);
         alert(`初始化失败: ${error.message}\n请刷新页面重试。`);
+    }
+}
+
+// 初始化存储提供商
+function initializeStorageProvider() {
+    try {
+        // 检查存储提供商设置
+        const storageProvider = localStorage.getItem('easy_note_storage_provider');
+        logInfo('Storage', `当前存储提供商: ${storageProvider || '未设置'}`);
+        
+        // 如果选择了Firebase，初始化Firebase集成
+        if (storageProvider === 'firebase' && window.FirebaseIntegration) {
+            logInfo('Storage', '初始化Firebase集成');
+            FirebaseIntegration.initialize();
+        }
+    } catch (error) {
+        logError('Storage', '初始化存储提供商时出错', error);
     }
 }
 
