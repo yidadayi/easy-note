@@ -9,7 +9,7 @@ document.addEventListener('DOMContentLoaded', async function() {
   
   try {
     // 初始化Firebase服务
-    window.FirebaseService = new FirebaseService();
+    window.FirebaseService = new FirebaseServiceClass();
     await window.FirebaseService.init();
     console.log('Firebase服务初始化完成');
     
@@ -18,8 +18,12 @@ document.addEventListener('DOMContentLoaded', async function() {
     window.UIController.initialize();
     console.log('UI控制器初始化完成');
     
+    // 初始化认证UI
+    window.AuthUI.initialize();
+    console.log('认证UI初始化完成');
+    
     // 初始化笔记服务
-    window.NoteService = new NoteService();
+    window.NoteService = new NoteServiceClass();
     console.log('笔记服务初始化完成');
     
     // 获取URL参数中的笔记ID

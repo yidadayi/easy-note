@@ -420,9 +420,10 @@ class FirebaseServiceClass {
   /**
    * 获取笔记
    * @param {string} noteId 笔记ID
+   * @param {number} [timestamp] 时间戳，用于防止缓存
    * @returns {Promise<Object>} 获取结果
    */
-  async getNote(noteId) {
+  async getNote(noteId, timestamp = null) {
     try {
       if (!this.isEnabled()) {
         return { success: false, error: '云存储未启用', code: 'cloud_disabled' };
@@ -437,7 +438,7 @@ class FirebaseServiceClass {
         return { success: false, error: '无效的笔记ID', code: 'invalid_id' };
       }
       
-      console.log(`[FirebaseService] 获取笔记: ${noteId}, 用户: ${user.uid}`);
+      console.log(`[FirebaseService] 获取笔记: ${noteId}, 用户: ${user.uid}${timestamp ? ', 强制刷新' : ''}`);
       
       try {
         // 添加超时控制
@@ -445,17 +446,24 @@ class FirebaseServiceClass {
           setTimeout(() => reject(new Error('获取笔记操作超时')), 8000);
         });
         
+        // 创建一个带有缓存控制的查询选项
+        const options = {};
+        if (timestamp) {
+          // 如果提供了时间戳参数，使用服务器数据（强制跳过缓存）
+          options.source = 'server';
+        }
+        
         // 首先尝试从用户自己的笔记集合中获取
         const userNotePath = this.db.collection('users').doc(user.uid).collection('notes').doc(noteId);
         const sharedNotePath = this.db.collection('shared_notes').doc(noteId);
         
-        // 并行请求用户笔记和共享笔记
+        // 并行请求用户笔记和共享笔记，使用缓存控制选项
         const [userNotePromise, sharedNotePromise] = [
-          userNotePath.get().catch(err => {
+          userNotePath.get(options).catch(err => {
             console.warn(`[FirebaseService] 获取用户笔记失败: ${err.message}`);
             return { exists: false };
           }),
-          sharedNotePath.get().catch(err => {
+          sharedNotePath.get(options).catch(err => {
             console.warn(`[FirebaseService] 获取共享笔记失败: ${err.message}`);
             return { exists: false };
           })

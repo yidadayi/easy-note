@@ -173,8 +173,21 @@ class AuthUIClass {
    * 打开登录模态框
    */
   showAuthModal() {
-    const modal = new bootstrap.Modal(document.getElementById('firebaseAuthModal'));
-    modal.show();
+    // 如果模态框实例已存在，直接使用
+    if (this.authModal) {
+      this.authModal.show();
+    } else {
+      // 否则重新创建模态框实例
+      const modalElement = document.getElementById('firebaseAuthModal');
+      if (modalElement) {
+        this.authModal = new bootstrap.Modal(modalElement);
+        this.authModal.show();
+      } else {
+        console.error('[AuthUI] 找不到firebaseAuthModal元素');
+        alert('错误: 找不到登录模态框元素');
+        return;
+      }
+    }
     
     // 检查Firebase服务是否已初始化
     if (!window.FirebaseService.initialized) {
@@ -384,9 +397,26 @@ class AuthUIClass {
     const errorToast = document.getElementById('errorToast');
     const errorMessage = document.getElementById('errorMessage');
     
-    errorMessage.textContent = message;
-    const toast = new bootstrap.Toast(errorToast);
-    toast.show();
+    // 先尝试设置全局错误提示
+    if (errorMessage && errorToast) {
+      errorMessage.textContent = message;
+      const toast = new bootstrap.Toast(errorToast);
+      toast.show();
+    }
+    
+    // 同时更新认证模块的错误信息
+    const authErrorMessage = document.getElementById('authErrorMessage');
+    if (authErrorMessage) {
+      authErrorMessage.textContent = message;
+      authErrorMessage.classList.remove('d-none');
+      
+      // 5秒后自动隐藏
+      setTimeout(() => {
+        authErrorMessage.classList.add('d-none');
+      }, 5000);
+    } else {
+      console.error('[AuthUI] authErrorMessage元素不存在');
+    }
   }
 
   /**

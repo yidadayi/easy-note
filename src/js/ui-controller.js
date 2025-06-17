@@ -380,7 +380,36 @@ class UIControllerClass {
     
     // 刷新按钮
     document.getElementById('refreshBtn').addEventListener('click', async () => {
-      await window.NoteService.refreshNote();
+      try {
+        console.log('[UIController] 刷新按钮被点击');
+        if (!window.NoteService || !window.NoteService.refreshNote) {
+          console.error('[UIController] NoteService.refreshNote方法不可用');
+          alert('刷新功能暂不可用，请稍后再试');
+          return;
+        }
+        
+        // 显示加载指示器
+        const refreshBtn = document.getElementById('refreshBtn');
+        const originalContent = refreshBtn.innerHTML;
+        refreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 刷新中...';
+        refreshBtn.disabled = true;
+        
+        await window.NoteService.refreshNote();
+        
+        // 恢复按钮状态
+        refreshBtn.innerHTML = originalContent;
+        refreshBtn.disabled = false;
+        
+        console.log('[UIController] 刷新完成');
+      } catch (error) {
+        console.error('[UIController] 刷新过程中出现错误', error);
+        alert('刷新失败: ' + error.message);
+        
+        // 恢复按钮状态
+        const refreshBtn = document.getElementById('refreshBtn');
+        refreshBtn.innerHTML = '<i class="bi bi-cloud-download"></i> 刷新';
+        refreshBtn.disabled = false;
+      }
     });
     
     // 复制链接按钮

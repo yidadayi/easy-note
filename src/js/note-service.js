@@ -56,6 +56,29 @@ class NoteServiceClass {
     window.addEventListener('beforeunload', () => {
       this.autoSave();
     });
+    
+    // 监听笔记内容变化
+    const noteContent = document.getElementById('noteContent');
+    if (noteContent) {
+      // 防抖处理，避免过于频繁的保存
+      let typingTimer;
+      const doneTypingInterval = 1000; // 输入完成后1秒保存
+      
+      noteContent.addEventListener('input', () => {
+        clearTimeout(typingTimer);
+        typingTimer = setTimeout(() => {
+          // 用户停止输入后保存
+          if (noteContent.value.trim()) {
+            console.log('[NoteService] 检测到内容变化，触发自动保存');
+            this.saveNote(noteContent.value);
+          }
+        }, doneTypingInterval);
+      });
+      
+      console.log('[NoteService] 笔记内容变更监听器已设置');
+    } else {
+      console.error('[NoteService] 无法找到noteContent元素');
+    }
   }
 
   /**
@@ -205,7 +228,9 @@ class NoteServiceClass {
           
           if (connectionTest) {
             this.updateLoadingStatus('Firebase连接成功，正在加载数据', 50);
-            const cloudResult = await this.loadNoteFromCloud(noteId);
+            // 添加时间戳参数强制从服务器获取最新数据
+            const timestamp = new Date().getTime();
+            const cloudResult = await this.loadNoteFromCloud(noteId, timestamp);
             
             if (cloudResult.success) {
               console.log('[NoteService] 从云端加载笔记成功');
@@ -244,12 +269,27 @@ class NoteServiceClass {
       
       localNote = this.loadNoteFromLocalStorage(noteId);
       
-      if (localNote) {
-        console.log('[NoteService] 从本地存储加载笔记成功');
-        this.updateLoadingStatus('本地存储加载成功', 80);
+      // 优先使用云端数据的情况:
+      // 1. 本地数据为空但云端有数据
+      // 2. 云端数据更新时间比本地新
+      if (cloudNote) {
+        const hasLocalContent = localNote && localNote.content && localNote.content.trim().length > 0;
         
-        // 如果云端和本地都有笔记，需要进行冲突处理
-        if (cloudNote) {
+        if (!hasLocalContent) {
+          // 如果本地没有内容，直接使用云端内容
+          console.log('[NoteService] 本地无内容，使用云端内容');
+          this.currentNote = cloudNote;
+          this.currentNote.syncedFromCloud = true;
+          this.updateNoteUI();
+          this.saveNoteToLocalStorage(); // 保存到本地以便离线访问
+          foundNote = true;
+          
+          // 隐藏加载指示器
+          clearTimeout(loadingTimeout);
+          document.getElementById('loadingIndicator').classList.add('d-none');
+          document.getElementById('noteContent').classList.remove('d-none');
+          return;
+        } else if (localNote) {
           // 解密如果需要
           let cloudContent = cloudNote.content;
           if (cloudNote.isEncrypted && this.password) {
@@ -324,17 +364,14 @@ class NoteServiceClass {
               this.currentNote.syncedFromCloud = false; // 标记为本地版本
             }
           }
-        } else {
-          // 只有本地版本
-          this.currentNote = localNote;
-          this.currentNote.syncedFromCloud = false; // 标记为本地版本
         }
-        
-        this.updateNoteUI();
-        foundNote = true;
+      } else if (localNote) {
+        // 只有本地版本
+        this.currentNote = localNote;
+        this.currentNote.syncedFromCloud = false; // 标记为本地版本
         
         // 如果云同步已启用但云端没找到笔记，则将本地笔记同步到云端
-        if (this.isCloudEnabled() && !cloudNote && cloudError !== 'permission_denied') {
+        if (this.isCloudEnabled() && cloudError !== 'permission_denied') {
           console.log('[NoteService] 将本地笔记同步到云端');
           this.updateLoadingStatus('正在将本地笔记同步到云端...', 80);
           await this.saveNoteToCloud().catch(err => {
@@ -342,57 +379,47 @@ class NoteServiceClass {
             this.updateLoadingStatus(`同步到云端失败: ${err.message}`, 0);
           });
         }
-      } else if (cloudNote) {
-        // 只有云端版本
-        console.log('[NoteService] 仅使用从云端加载的笔记');
-        this.currentNote = cloudNote;
-        this.currentNote.syncedFromCloud = true; // 标记为从云端同步
-        this.updateNoteUI();
-        this.saveNoteToLocalStorage(); // 保存到本地以便离线访问
-        foundNote = true;
       } else {
         console.log(`[NoteService] 本地存储中未找到笔记 ${noteId}`);
         this.updateLoadingStatus('本地未找到笔记', 70);
+        
+        // 如果既没有本地版本也没有云端版本，创建新笔记
+        if (!cloudNote) {
+          console.log('[NoteService] 创建新笔记');
+          this.createNoteWithId(noteId);
+          foundNote = true;
+        }
       }
       
-      // 如果都没找到，创建新笔记，但保持当前ID
-      if (!foundNote) {
-        console.log(`[NoteService] 笔记 ${noteId} 未找到，创建同ID的新笔记`);
-        this.updateLoadingStatus('创建新笔记...', 90);
+      // 如果找到了笔记，更新UI
+      if (foundNote) {
+        this.updateNoteUI();
+      } else {
+        // 如果所有来源都未找到笔记，创建新笔记
+        console.log('[NoteService] 所有来源都未找到笔记，创建新笔记');
         this.createNoteWithId(noteId);
-        this.currentNote.syncedFromCloud = false; // 标记为本地版本
-        this.updateLoadingStatus('新笔记创建完成', 100);
-      }
-      
-      return true;
-    } catch (error) {
-      console.error('[NoteService] 加载笔记失败', error);
-      this.showError('加载笔记失败: ' + error.message);
-      
-      // 在错误情况下，尝试创建同ID的新笔记作为恢复手段
-      try {
-        console.log(`[NoteService] 尝试恢复：创建ID为 ${noteId} 的新笔记`);
-        this.updateLoadingStatus('加载失败，创建新笔记...', 50);
-        this.createNoteWithId(noteId);
-        this.currentNote.syncedFromCloud = false; // 标记为本地版本
-        this.updateLoadingStatus('新笔记创建完成', 100);
-        return true;
-      } catch (recoveryError) {
-        console.error('[NoteService] 创建恢复笔记也失败', recoveryError);
-        this.updateLoadingStatus('恢复失败', 0);
-        return false;
-      }
-    } finally {
-      // 清除超时
-      if (loadingTimeout) {
-        clearTimeout(loadingTimeout);
+        this.updateNoteUI();
       }
       
       // 隐藏加载指示器
-      setTimeout(() => {
-        document.getElementById('loadingIndicator').classList.add('d-none');
-        document.getElementById('noteContent').classList.remove('d-none');
-      }, 500); // 给用户一点时间看到最终状态
+      clearTimeout(loadingTimeout);
+      document.getElementById('loadingIndicator').classList.add('d-none');
+      document.getElementById('noteContent').classList.remove('d-none');
+    } catch (error) {
+      console.error('[NoteService] 加载笔记失败', error);
+      clearTimeout(loadingTimeout);
+      // 显示错误信息
+      this.showError(`加载笔记失败: ${error.message}`);
+      
+      // 如果有currentNote保持当前笔记，否则创建新的笔记
+      if (!this.currentNote) {
+        this.createNoteWithId(noteId);
+        this.updateNoteUI();
+      }
+      
+      // 隐藏加载指示器
+      document.getElementById('loadingIndicator').classList.add('d-none');
+      document.getElementById('noteContent').classList.remove('d-none');
     }
   }
 
@@ -476,9 +503,10 @@ class NoteServiceClass {
   /**
    * 从云端加载笔记
    * @param {string} noteId 笔记ID
+   * @param {number} timestamp 可选，时间戳，用于强制从服务器获取最新数据
    * @returns {Promise<Object>} 加载结果
    */
-  async loadNoteFromCloud(noteId) {
+  async loadNoteFromCloud(noteId, timestamp = null) {
     try {
       if (!this.isCloudEnabled()) {
         this.updateLoadingStatus('云存储未启用，仅使用本地存储', 30);
@@ -497,7 +525,7 @@ class NoteServiceClass {
       });
       
       // 调用Firebase服务
-      const resultPromise = window.FirebaseService.getNote(noteId);
+      const resultPromise = window.FirebaseService.getNote(noteId, timestamp);
       
       // 使用Promise.race实现超时
       const result = await Promise.race([resultPromise, timeoutPromise])
@@ -967,6 +995,30 @@ ${cloudContent}`;
     
     // 更新笔记状态
     this.updateNoteStatus();
+    
+    // 确保监听器在内容更新后设置
+    if (noteContent) {
+      // 移除可能存在的旧监听器，避免重复
+      const newNoteContent = noteContent.cloneNode(true);
+      noteContent.parentNode.replaceChild(newNoteContent, noteContent);
+      
+      // 防抖处理，避免过于频繁的保存
+      let typingTimer;
+      const doneTypingInterval = 1000; // 输入完成后1秒保存
+      
+      newNoteContent.addEventListener('input', () => {
+        clearTimeout(typingTimer);
+        typingTimer = setTimeout(() => {
+          // 用户停止输入后保存
+          if (newNoteContent.value.trim()) {
+            console.log('[NoteService] 检测到内容变化，触发自动保存');
+            this.saveNote(newNoteContent.value);
+          }
+        }, doneTypingInterval);
+      });
+      
+      console.log('[NoteService] 笔记内容变更监听器已重新设置');
+    }
   }
 
   /**
@@ -1523,6 +1575,129 @@ ${cloudContent}`;
     const now = new Date();
     const diff = now - this.lastSavedTime;
     return diff < 5000; // 5秒内有保存操作，认为没有未保存内容
+  }
+
+  /**
+   * 刷新当前笔记
+   * 总是优先从云端获取最新数据，特别是当本地为空时
+   * @returns {Promise<void>}
+   */
+  async refreshNote() {
+    try {
+      if (!this.currentNote) {
+        console.error('[NoteService] 无法刷新，当前没有活动笔记');
+        return;
+      }
+      
+      console.log(`[NoteService] 刷新笔记: ${this.currentNote.id}`);
+      
+      // 显示加载指示器
+      document.getElementById('loadingIndicator').classList.remove('d-none');
+      document.getElementById('noteContent').classList.add('d-none');
+      this.updateLoadingStatus('正在刷新笔记...', 10);
+      
+      const noteId = this.currentNote.id;
+      
+      // 优先尝试从云端获取最新数据
+      if (this.isCloudEnabled()) {
+        try {
+          console.log('[NoteService] 正在强制从云端获取最新数据');
+          this.updateLoadingStatus('正在从云端获取最新数据...', 30);
+          
+          // 添加时间戳参数强制跳过缓存
+          const timestamp = new Date().getTime();
+          const cloudResult = await window.FirebaseService.getNote(noteId, timestamp);
+          
+          if (cloudResult.success) {
+            console.log('[NoteService] 从云端获取数据成功');
+            this.updateLoadingStatus('云端数据获取成功', 70);
+            
+            // 获取当前内容（可能是本地内容）
+            const currentContent = document.getElementById('noteContent').value;
+            const cloudContent = cloudResult.noteData.content || '';
+            
+            // 比较云端和本地内容
+            if (cloudContent && (!currentContent || cloudContent.trim() !== currentContent.trim())) {
+              console.log('[NoteService] 云端内容与当前内容不同，更新为云端内容');
+              // 如果是加密内容且有密码，尝试解密
+              if (cloudResult.noteData.isEncrypted && this.password) {
+                try {
+                  this.currentNote.content = this.decryptContent(cloudContent, this.password);
+                } catch (error) {
+                  console.error('[NoteService] 解密云端内容失败', error);
+                  this.showError('解密云端内容失败: ' + error.message);
+                  // 保留未解密的内容
+                  this.currentNote.content = cloudContent;
+                }
+              } else {
+                this.currentNote.content = cloudContent;
+              }
+              this.currentNote.isEncrypted = cloudResult.noteData.isEncrypted;
+              this.currentNote.updatedAt = cloudResult.noteData.updatedAt;
+              this.currentNote.syncedFromCloud = true;
+              
+              // 更新UI显示云端内容
+              this.updateNoteUI();
+              // 保存到本地存储
+              this.saveNoteToLocalStorage();
+              
+              this.updateLoadingStatus('已更新为云端最新内容', 100);
+            } else {
+              console.log('[NoteService] 云端内容与当前内容相同或为空，保持当前内容');
+              this.updateLoadingStatus('内容已是最新', 100);
+            }
+          } else if (cloudResult.notFound) {
+            console.log('[NoteService] 云端未找到笔记');
+            this.updateLoadingStatus('云端未找到该笔记', 40);
+            
+            // 如果当前有内容，询问是否保存到云端
+            const currentContent = document.getElementById('noteContent').value;
+            if (currentContent.trim()) {
+              const shouldSaveToCloud = confirm('云端未找到该笔记，是否将当前内容保存到云端？');
+              if (shouldSaveToCloud) {
+                this.updateLoadingStatus('正在保存到云端...', 60);
+                await this.saveNoteToCloud();
+                this.updateLoadingStatus('已保存到云端', 100);
+              }
+            }
+          } else {
+            console.warn('[NoteService] 从云端获取数据失败:', cloudResult.error);
+            this.updateLoadingStatus('云端数据获取失败', 40);
+            this.showError(`无法从云端获取数据: ${cloudResult.error}`);
+          }
+        } catch (error) {
+          console.error('[NoteService] 从云端刷新失败', error);
+          this.updateLoadingStatus('云端连接失败', 40);
+          this.showError(`刷新失败: ${error.message}`);
+        }
+      } else {
+        console.log('[NoteService] 云存储未启用，无法从云端刷新');
+        this.updateLoadingStatus('云存储未启用，无法刷新云端数据', 50);
+        
+        // 如果云存储未启用，直接从本地加载
+        const localNote = this.loadNoteFromLocalStorage(noteId);
+        if (localNote) {
+          console.log('[NoteService] 已加载本地存储的内容');
+          this.updateLoadingStatus('已加载本地数据', 100);
+        } else {
+          console.log('[NoteService] 本地无笔记数据');
+          this.updateLoadingStatus('本地无数据', 100);
+        }
+      }
+      
+      // 隐藏加载指示器
+      document.getElementById('loadingIndicator').classList.add('d-none');
+      document.getElementById('noteContent').classList.remove('d-none');
+      
+      console.log('[NoteService] 笔记刷新完成');
+    } catch (error) {
+      console.error('[NoteService] 刷新笔记失败', error);
+      this.showError('刷新笔记失败: ' + error.message);
+      
+      // 确保加载指示器被隐藏
+      document.getElementById('loadingIndicator').classList.add('d-none');
+      document.getElementById('noteContent').classList.remove('d-none');
+    }
   }
 }
 
