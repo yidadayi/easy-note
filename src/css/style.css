@@ -1,0 +1,37 @@
+/* 修改移动设备上的笔记编辑区样式 */
+@media (max-width: 768px) {
+  .note-content {
+    background-color: #fff !important;
+    color: #333 !important;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    padding: 15px !important;
+    margin-bottom: 15px !important;
+  }
+  
+  #noteContent {
+    background-color: #fff !important;
+    color: #333 !important;
+  }
+  
+  #noteContent .ql-editor {
+    background-color: #fff !important;
+    color: #333 !important;
+    min-height: 70vh;
+  }
+  
+  /* 改善在移动设备上按钮的触摸区域 */
+  .btn {
+    padding: 10px 15px !important;
+    margin: 5px !important;
+  }
+  
+  /* 移动端笔记信息样式 */
+  .note-info {
+    padding: 8px !important;
+    color: #555 !important;
+    background-color: rgba(255, 255, 255, 0.9) !important;
+    border-radius: 4px;
+    margin-top: 10px !important;
+  }
+} 
