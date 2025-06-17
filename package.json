@@ -1,0 +1,25 @@
+{
+  "name": "easy-note",
+  "version": "1.0.0",
+  "description": "一个简单、安全的在线笔记应用",
+  "main": "index.html",
+  "scripts": {
+    "start": "serve -s .",
+    "build": "node build.js",
+    "deploy": "npm run build && netlify deploy --prod"
+  },
+  "keywords": [
+    "notes",
+    "online",
+    "encrypted",
+    "firebase"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "serve": "^14.2.1"
+  },
+  "devDependencies": {
+    "netlify-cli": "^17.18.1"
+  }
+} 
