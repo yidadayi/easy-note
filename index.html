@@ -4,53 +4,66 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <!-- 禁用暗色模式 -->
+    <meta name="color-scheme" content="light only">
+    <meta name="supported-color-schemes" content="light only">
     <!-- 更宽松的CSP策略 -->
     <meta http-equiv="Content-Security-Policy" content="default-src * 'self' data: blob: 'unsafe-inline' 'unsafe-eval' https://* http://*;">
     <title>Easy Note - 简易在线记事本</title>
     <meta name="description" content="一个简单、安全的在线记事本应用，无需登录即可使用，支持笔记加密和多设备访问">
-    <link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="src/assets/manifest.json">
     <meta name="theme-color" content="#0d6efd">
-    <link rel="icon" href="favicon.ico">
-    <link rel="apple-touch-icon" href="icon-192.png">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="src/assets/favicon.ico">
+    <link rel="apple-touch-icon" href="src/assets/icons/icon-192.png">
+    <link rel="stylesheet" href="src/css/styles.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- 确保所有外部资源使用HTTPS -->
 </head>
 <body>
-    <div class="container-fluid">
-        <header class="py-3 mb-3 border-bottom">
-            <div class="container-fluid d-flex align-items-center">
-                <h1 class="fs-4 me-auto">Easy Note</h1>
-                <div class="btn-toolbar">
-                    <button id="backBtn" class="btn btn-sm btn-outline-secondary me-2">
-                        <i class="bi bi-arrow-left"></i> 返回
-                    </button>
-                    <button id="newNoteBtn" class="btn btn-sm btn-outline-primary me-2">
-                        <i class="bi bi-file-earmark-plus"></i> 新建
-                    </button>
-                    <button id="shareBtn" class="btn btn-sm btn-outline-success me-2">
-                        <i class="bi bi-share"></i> 分享
-                    </button>
-                    <button id="lockBtn" class="btn btn-sm btn-outline-danger">
-                        <i class="bi bi-lock"></i> 加密
-                    </button>
-                </div>
+    <div class="container-fluid py-3">
+        <!-- 顶部导航 -->
+        <header class="d-flex flex-wrap justify-content-between align-items-center pb-3 mb-4 border-bottom">
+            <h1 class="fs-4 d-flex align-items-center mb-0">
+                <i class="bi bi-journal-text me-2"></i>
+                Easy Note
+            </h1>
+            <div class="btn-toolbar">
+                <button id="newNoteBtn" class="btn btn-sm btn-outline-primary me-2">
+                    <i class="bi bi-plus-lg"></i> 新建
+                </button>
+                <button id="shareBtn" class="btn btn-sm btn-outline-success me-2">
+                    <i class="bi bi-share"></i> 分享
+                </button>
+                <button id="lockBtn" class="btn btn-sm btn-outline-danger me-2">
+                    <i class="bi bi-lock"></i> 加密
+                </button>
+                <button id="historyBtn" class="btn btn-sm btn-outline-secondary me-2">
+                    <i class="bi bi-clock-history"></i> 历史
+                </button>
+                <button id="refreshBtn" class="btn btn-sm btn-outline-info">
+                    <i class="bi bi-cloud-download"></i> 刷新
+                </button>
             </div>
         </header>
 
-        <main class="container-fluid">
+        <!-- 主要内容 -->
+        <main>
             <div class="row">
                 <div class="col-md-12">
                     <div id="noteContainer" class="card">
                         <div class="card-body">
-                            <textarea id="noteContent" class="form-control" placeholder="在此处输入您的笔记内容..."></textarea>
+                            <textarea id="noteContent" class="form-control note-content" placeholder="在此处输入您的笔记内容..."></textarea>
                             <div id="loadingIndicator" class="text-center py-3 d-none">
                                 <div class="spinner-border text-primary" role="status">
                                     <span class="visually-hidden">加载中...</span>
                                 </div>
-                                <p class="mt-2">正在加载笔记...</p>
+                                <p class="mt-2" id="loadingMessage">正在加载笔记...</p>
+                                <div class="progress mt-3" style="height: 5px;">
+                                    <div id="loadingProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                                </div>
+                                <p class="mt-2 small text-muted" id="loadingDetails">正在连接到Firebase...</p>
                             </div>
                         </div>
                         <div class="card-footer text-muted">
@@ -60,7 +73,7 @@
                                     <span id="noteIdDisplay" class="me-2" title="点击复制笔记ID" style="cursor: pointer;">
                                         <i class="bi bi-link-45deg"></i> <span id="noteIdValue"></span>
                                     </span>
-                                    <span id="syncStatus" class="text-warning" title="点击设置GitHub访问">
+                                    <span id="syncStatus" class="text-warning" style="cursor: pointer;" title="点击设置云存储" data-bs-toggle="modal" data-bs-target="#firebaseAuthModal">
                                         <i class="bi bi-cloud-slash"></i> 本地模式
                                     </span>
                                     <span id="noteStatus" class="ms-2">公开笔记</span>
@@ -141,167 +154,123 @@
             </div>
         </div>
         
-        <!-- 云存储选项模态框 -->
-        <div class="modal fade" id="storageOptionsModal" tabindex="-1" aria-labelledby="storageOptionsModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
+        <!-- 历史笔记模态框 -->
+        <div class="modal fade" id="historyModal" tabindex="-1" aria-labelledby="historyModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title" id="storageOptionsModalLabel">云存储选项</h5>
+                        <h5 class="modal-title" id="historyModalLabel">我的笔记历史</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
-                        <div class="form-check mb-3">
-                            <input class="form-check-input" type="radio" name="storageOption" id="useFirebase" value="firebase" checked>
-                            <label class="form-check-label" for="useFirebase">
-                                <i class="bi bi-cloud"></i> 使用Firebase存储 <span class="badge bg-success">推荐</span>
-                            </label>
-                            <div class="form-text">使用Firebase提供稳定可靠的跨设备访问体验</div>
+                        <div id="historyNotesList" class="list-group mb-3">
+                            <!-- 笔记列表将被动态加载到这里 -->
+                            <div id="historyNotesLoading" class="text-center py-3">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">加载中...</span>
+                                </div>
+                                <p class="mt-2">正在加载笔记列表...</p>
+                            </div>
                         </div>
-                        <div class="form-check mb-3">
-                            <input class="form-check-input" type="radio" name="storageOption" id="useGitHub" value="github">
-                            <label class="form-check-label" for="useGitHub">
-                                <i class="bi bi-github"></i> 使用GitHub Gist存储
-                            </label>
-                            <div class="form-text">使用GitHub Gist提供跨设备访问体验（可能不稳定）</div>
+                        <div id="historyNotesEmpty" class="alert alert-info d-none">
+                            您没有保存的笔记。创建一个新笔记并保存到云端后，它将显示在这里。
                         </div>
-                        <div class="form-check mb-3">
-                            <input class="form-check-input" type="radio" name="storageOption" id="useLocalOnly" value="local">
-                            <label class="form-check-label" for="useLocalOnly">
-                                <i class="bi bi-hdd"></i> 仅使用本地存储 (不同步到云端)
-                            </label>
-                            <div class="form-text">笔记只会保存在当前设备上，无法在其他设备访问</div>
-                        </div>
-                        <div class="alert alert-info mt-3">
-                            <i class="bi bi-info-circle"></i> <strong>移动设备测试技巧</strong>
-                            <p class="mb-0 mt-1">在URL后添加<code>?local=true</code>参数可强制使用本地模式，更适合移动设备上的多端测试。例如：<br>
-                            <code>http://192.168.1.x:8000/?local=true</code></p>
+                        <div id="historyNotesError" class="alert alert-danger d-none">
+                            加载笔记列表时发生错误。请确保您已登录并连接到互联网。
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                        <button type="button" class="btn btn-primary" id="saveStorageOptionsBtn">保存设置</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- GitHub授权模态框 -->
-        <div class="modal fade" id="githubTokenModal" tabindex="-1" aria-labelledby="githubTokenModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="githubTokenModalLabel">GitHub授权</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div id="cloudStatusDetails">
-                            <div class="text-center mb-4">
-                                <i class="bi bi-github" style="font-size: 3rem;"></i>
-                                <h5 class="mt-3">使用GitHub账户授权</h5>
-                            </div>
-                            
-                            <div class="alert alert-info">
-                                <i class="bi bi-info-circle"></i> 应用需要访问您的GitHub Gist以实现云同步功能。点击下方按钮将跳转到GitHub进行授权。
-                            </div>
-                            
-                            <p>授权后，Easy Note将能够：</p>
-                            <ul>
-                                <li>创建私有Gist存储您的笔记</li>
-                                <li>读取、更新您的笔记内容</li>
-                                <li>在多设备间同步您的笔记</li>
-                            </ul>
-                            
-                            <div class="alert alert-light border">
-                                <i class="bi bi-shield-check"></i> <strong>安全说明</strong>
-                                <p class="small mb-0 mt-1">
-                                    - 授权过程直接通过GitHub进行，应用不会存储您的密码<br>
-                                    - 仅申请必要的Gist权限，不会访问您的仓库或个人信息<br>
-                                    - 您可以随时在GitHub设置中撤销授权
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                        <button type="button" class="btn btn-primary" id="saveGithubTokenBtn">
-                            <i class="bi bi-github"></i> 使用GitHub授权
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                        <button type="button" class="btn btn-primary" id="refreshHistoryBtn">
+                            <i class="bi bi-arrow-clockwise"></i> 刷新列表
                         </button>
                     </div>
                 </div>
             </div>
         </div>
-
-        <!-- 调试模态框 -->
-        <div class="modal fade" id="debugModal" tabindex="-1" aria-labelledby="debugModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
+        
+        <!-- Firebase 登录模态框 -->
+        <div class="modal fade" id="firebaseAuthModal" tabindex="-1" aria-labelledby="firebaseAuthModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
                 <div class="modal-content">
-                    <div class="modal-header bg-info text-white">
-                        <h5 class="modal-title" id="debugModalLabel">调试信息</h5>
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="firebaseAuthModalLabel">Firebase 账户</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
-                        <pre id="debugMessage" class="bg-light p-3" style="max-height: 300px; overflow-y: auto;"></pre>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                        <ul class="nav nav-tabs" id="authTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" id="login-tab" data-bs-toggle="tab" data-bs-target="#login-tab-pane" type="button" role="tab" aria-controls="login-tab-pane" aria-selected="true">登录</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="register-tab" data-bs-toggle="tab" data-bs-target="#register-tab-pane" type="button" role="tab" aria-controls="register-tab-pane" aria-selected="false">注册</button>
+                            </li>
+                        </ul>
+                        <div class="tab-content pt-3" id="authTabContent">
+                            <div class="tab-pane fade show active" id="login-tab-pane" role="tabpanel" aria-labelledby="login-tab" tabindex="0">
+                                <form id="loginForm">
+                                    <div class="mb-3">
+                                        <label for="loginEmail" class="form-label">邮箱</label>
+                                        <input type="email" class="form-control" id="loginEmail" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="loginPassword" class="form-label">密码</label>
+                                        <input type="password" class="form-control" id="loginPassword" required>
+                                    </div>
+                                    <div class="d-grid gap-2">
+                                        <button type="submit" class="btn btn-primary">登录</button>
+                                        <button type="button" id="googleLoginBtn" class="btn btn-outline-danger">
+                                            <i class="bi bi-google"></i> 使用 Google 账户登录
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                            <div class="tab-pane fade" id="register-tab-pane" role="tabpanel" aria-labelledby="register-tab" tabindex="0">
+                                <form id="registerForm">
+                                    <div class="mb-3">
+                                        <label for="registerEmail" class="form-label">邮箱</label>
+                                        <input type="email" class="form-control" id="registerEmail" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="registerPassword" class="form-label">密码</label>
+                                        <input type="password" class="form-control" id="registerPassword" required minlength="6">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="confirmPassword" class="form-label">确认密码</label>
+                                        <input type="password" class="form-control" id="confirmPassword" required minlength="6">
+                                    </div>
+                                    <div class="d-grid">
+                                        <button type="submit" class="btn btn-primary">注册</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- 错误信息展示区域 -->
-        <div class="alert alert-danger d-none fixed-top m-3" id="errorMessage" role="alert">
+        <!-- 错误消息提示 -->
+        <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+            <div id="errorToast" class="toast align-items-center bg-danger text-white border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="d-flex">
+                    <div class="toast-body" id="errorMessage">
+                        发生错误
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+            </div>
         </div>
-        
-        <!-- CSS for spinner animation -->
-        <style>
-            .spin {
-                animation: spin 1.5s linear infinite;
-            }
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-            
-            /* 错误信息样式 */
-            #errorMessage {
-                z-index: 1100;
-                opacity: 0.9;
-                transition: opacity 0.5s;
-                cursor: pointer;
-            }
-            #errorMessage:hover {
-                opacity: 1;
-            }
-        </style>
-        
-        <script>
-            // Register service worker for offline capability
-            if ('serviceWorker' in navigator) {
-                window.addEventListener('load', () => {
-                    // 获取当前路径，适应GitHub Pages部署位置
-                    const basePath = location.pathname.includes('/easy-note') ? '/easy-note/' : '/';
-                    navigator.serviceWorker.register(`${basePath}sw.js`)
-                        .then(registration => {
-                            console.log('Service Worker registered with scope:', registration.scope);
-                        })
-                        .catch(error => {
-                            console.error('Service Worker registration failed:', error);
-                            // Service Worker失败不影响应用核心功能
-                        });
-                });
-            }
-            
-            // 控制台输出版本信息，方便调试
-            console.log('Easy Note version 1.1.0 - GitHub Pages Edition');
-
-            // 注意：错误消息点击隐藏的功能已移至app.js中的主初始化函数
-        </script>
     </div>
 
     <!-- 页脚部分 -->
     <footer class="mt-5 mb-3 text-center text-muted">
         <p>Easy Note - 安全便捷的在线笔记 &copy; 2023</p>
+        <div id="userHistoryBar" class="d-none">
+            <a href="#" id="historyLink" class="text-primary">
+                <i class="bi bi-clock-history"></i> 查看我的历史笔记
+            </a>
+        </div>
     </footer>
     
     <!-- 调试工具按钮 -->
@@ -358,19 +327,68 @@
         </div>
     </div>
 
+    <!-- JavaScript 依赖 -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/crypto-js@4.1.1/crypto-js.min.js"></script>
-    
+
     <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
     
     <!-- 应用脚本 -->
-    <script src="oauth.js"></script>
-    <script src="cloud-storage.js"></script>
-    <script src="firebase-storage.js"></script>
-    <script src="firebase-integration.js"></script>
-    <script src="app.js"></script>
+    <script src="src/js/firebase-config.js"></script>
+    <script src="src/js/firebase-service.js"></script>
+    <script src="src/js/ui-controller.js"></script>
+    <script src="src/js/auth-ui.js"></script>
+    <script src="src/js/note-service.js"></script>
+    <script src="src/js/app.js"></script>
+
+    <!-- Service Worker注册 -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/src/js/sw.js')
+                    .then(function(registration) {
+                        console.log('Service Worker注册成功:', registration.scope);
+                    })
+                    .catch(function(error) {
+                        console.error('Service Worker注册失败:', error);
+                    });
+            });
+        }
+    </script>
+    
+    <!-- 调试脚本 -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // 测试syncStatus点击事件
+            const syncStatus = document.getElementById('syncStatus');
+            if (syncStatus) {
+                // 添加直接点击处理
+                syncStatus.addEventListener('click', function() {
+                    console.log('直接点击本地模式按钮');
+                    
+                    // 尝试手动打开模态框
+                    const firebaseAuthModal = document.getElementById('firebaseAuthModal');
+                    if (firebaseAuthModal) {
+                        console.log('找到认证模态框，尝试打开');
+                        try {
+                            const modal = new bootstrap.Modal(firebaseAuthModal);
+                            modal.show();
+                        } catch (e) {
+                            console.error('模态框打开失败:', e);
+                            alert('模态框打开失败: ' + e.message);
+                        }
+                    } else {
+                        console.error('未找到认证模态框');
+                        alert('未找到认证模态框元素');
+                    }
+                });
+            } else {
+                console.error('未找到syncStatus元素');
+            }
+        });
+    </script>
 </body>
 </html> 

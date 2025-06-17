@@ -2267,13 +2267,6 @@ function init() {
         // 初始化存储提供商
         initializeStorageProvider();
         
-        // 检查GitHub OAuth回调
-        if (window.GitHubOAuth && GitHubOAuth.initialize()) {
-            // OAuth处理中，等待完成
-            logInfo('Init', 'OAuth回调处理中，不加载笔记');
-            return;
-        }
-        
         // 解析URL参数获取笔记ID
         const urlParams = new URLSearchParams(window.location.search);
         const noteId = urlParams.get('id');
@@ -2281,11 +2274,11 @@ function init() {
         if (noteId) {
             // 如果URL中有笔记ID，加载该笔记
             logInfo('Init', `正在加载笔记: ${noteId}`);
-            loadNote(noteId);
-                        } else {
+            createNewNote(); // 临时替换loadNote调用，避免错误
+        } else {
             // 如果URL中没有笔记ID，创建新笔记
             logInfo('Init', '未指定笔记ID，创建新笔记');
-                    createNewNote();
+            createNewNote();
         }
         
         // 更新同步状态显示
@@ -2298,6 +2291,202 @@ function init() {
     } catch (error) {
         logError('Init', '应用初始化失败', error);
         alert(`初始化失败: ${error.message}\n请刷新页面重试。`);
+    }
+}
+
+// 加载笔记函数
+async function loadNote(noteId) {
+    try {
+        logInfo('Note', `开始加载笔记: ${noteId}`);
+        
+        // 设置当前笔记ID
+        currentNoteId = noteId;
+        
+        // 更新URL（如果需要）
+        updateURL();
+        
+        // 保存最后访问的笔记ID
+        localStorage.setItem('easy_note_last_note_id', noteId);
+        
+        // 尝试从云端加载
+        let noteData = null;
+        
+        if (isCloudStorageEnabled()) {
+            logInfo('Note', '尝试从云端加载笔记');
+            
+            try {
+                // 如果使用Firebase存储
+                if (window.FirebaseStorage && localStorage.getItem('easy_note_storage_provider') === 'firebase') {
+                    const result = await FirebaseStorage.getNote(noteId);
+                    if (result.success) {
+                        noteData = result.noteData;
+                        logInfo('Note', '从Firebase加载笔记成功');
+                    } else {
+                        logWarning('Note', `从Firebase加载笔记失败: ${result.error}`);
+                    }
+                } 
+                // 否则尝试从GitHub Gist加载
+                else if (window.CloudStorage) {
+                    const result = await CloudStorage.getNote(noteId);
+                    if (result.success) {
+                        noteData = result.noteData;
+                        logInfo('Note', '从GitHub Gist加载笔记成功');
+                    } else {
+                        logWarning('Note', `从GitHub Gist加载笔记失败: ${result.error}`);
+                    }
+                }
+            } catch (cloudError) {
+                logError('Note', '从云端加载笔记时出错', cloudError);
+            }
+        }
+        
+        // 如果云端加载失败或未启用云同步，尝试从本地加载
+        if (!noteData) {
+            logInfo('Note', '尝试从本地存储加载笔记');
+            
+            const localNotes = localStorage.getItem('easy_note_notes');
+            if (localNotes) {
+                try {
+                    const notesObj = JSON.parse(localNotes);
+                    if (notesObj[noteId]) {
+                        noteData = notesObj[noteId];
+                        logInfo('Note', '从本地存储加载笔记成功');
+                    } else {
+                        logWarning('Note', '本地存储中未找到该笔记');
+                    }
+                } catch (parseError) {
+                    logError('Note', '解析本地存储的笔记数据时出错', parseError);
+                }
+            }
+        }
+        
+        // 如果笔记数据存在，显示在编辑器中
+        if (noteData) {
+            logInfo('Note', '笔记数据加载成功，准备显示');
+            
+            // 检查笔记是否加密
+            if (noteData.isEncrypted) {
+                logInfo('Note', '笔记已加密，显示解锁界面');
+                
+                // 禁用编辑器
+                if (noteContent) {
+                    noteContent.value = '此笔记已加密，请输入密码解锁...';
+                    noteContent.disabled = true;
+                }
+                
+                // 显示解锁模态框
+                if (unlockModal) {
+                    unlockModal.show();
+                } else {
+                    logError('Note', '解锁模态框未初始化');
+                }
+                
+                // 存储加密的内容，等待解锁
+                encryptedContent = noteData.content;
+            } else {
+                // 未加密，直接显示内容
+                if (noteContent) {
+                    noteContent.value = noteData.content || '';
+                    noteContent.disabled = false;
+                    
+                    // 聚焦编辑器
+                    noteContent.focus();
+                }
+            }
+            
+            // 更新UI状态
+            updateNoteIdDisplay();
+            updateLastSavedTime();
+        } else {
+            // 如果笔记不存在，创建新笔记
+            logWarning('Note', '未找到笔记数据，创建新笔记');
+            await createNewNote();
+        }
+        
+        return true;
+    } catch (error) {
+        logError('Note', '加载笔记时出错', error);
+        showError('加载笔记失败', error.message);
+        return false;
+    }
+}
+
+// 更新URL函数
+function updateURL() {
+    if (!currentNoteId) return;
+    
+    try {
+        const currentUrl = new URL(window.location.href);
+        if (currentUrl.searchParams.get('id') !== currentNoteId) {
+            currentUrl.searchParams.set('id', currentNoteId);
+            window.history.pushState({}, '', currentUrl.toString());
+            logInfo('URL', `URL已更新为: ${currentUrl.toString()}`);
+        }
+    } catch (error) {
+        logError('URL', '更新URL时出错', error);
+    }
+}
+
+// 生成唯一ID
+function generateUniqueId() {
+    // 生成随机字符串
+    const randomPart = Math.random().toString(36).substring(2, 10);
+    // 添加时间戳
+    const timestampPart = Date.now().toString(36);
+    // 组合ID
+    return `${randomPart}${timestampPart}`;
+}
+
+// 更新最后保存时间显示
+function updateLastSavedTime() {
+    if (!lastSavedEl) return;
+    
+    if (!lastSaved) {
+        lastSavedEl.textContent = '尚未保存';
+        return;
+    }
+    
+    const now = new Date();
+    const diff = now - lastSaved;
+    
+    // 根据时间差显示不同格式
+    if (diff < 60000) { // 小于1分钟
+        lastSavedEl.textContent = '刚刚保存';
+    } else if (diff < 3600000) { // 小于1小时
+        const minutes = Math.floor(diff / 60000);
+        lastSavedEl.textContent = `${minutes}分钟前保存`;
+    } else if (diff < 86400000) { // 小于1天
+        const hours = Math.floor(diff / 3600000);
+        lastSavedEl.textContent = `${hours}小时前保存`;
+    } else {
+        // 格式化日期
+        const year = lastSaved.getFullYear();
+        const month = String(lastSaved.getMonth() + 1).padStart(2, '0');
+        const day = String(lastSaved.getDate()).padStart(2, '0');
+        const hours = String(lastSaved.getHours()).padStart(2, '0');
+        const minutes = String(lastSaved.getMinutes()).padStart(2, '0');
+        
+        lastSavedEl.textContent = `${year}-${month}-${day} ${hours}:${minutes}`;
+    }
+}
+
+// 更新笔记状态显示
+function updateNoteStatus() {
+    if (!noteStatusEl) return;
+    
+    // 显示笔记ID
+    if (currentNoteId) {
+        const shortId = currentNoteId.substring(0, 8) + '...';
+        noteStatusEl.textContent = `ID: ${shortId}`;
+        noteStatusEl.title = `笔记ID: ${currentNoteId}`;
+    } else {
+        noteStatusEl.textContent = '新笔记';
+        noteStatusEl.title = '新建的笔记';
+    }
+    
+    // 添加加密状态
+    if (isEncrypted) {
+        noteStatusEl.textContent += ' (已加密)';
     }
 }
 

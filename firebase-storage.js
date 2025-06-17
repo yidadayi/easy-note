@@ -3,12 +3,12 @@
 
 // Firebase 配置
 const FIREBASE_CONFIG = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyDYgQwMxfGQPBqEdTIQnz2BYlkA__mA7jQ",
+  authDomain: "easy-note-60097.firebaseapp.com",
+  projectId: "easy-note-60097",
+  storageBucket: "easy-note-60097.firebasestorage.app",
+  messagingSenderId: "43306977967",
+  appId: "1:43306977967:web:a9098fc06d7a075584a25a"
 };
 
 // 存储键
