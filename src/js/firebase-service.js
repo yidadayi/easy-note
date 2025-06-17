@@ -31,6 +31,37 @@ class FirebaseServiceClass {
       this.auth = firebase.auth();
       this.db = firebase.firestore();
 
+      // 检查是否有待处理的重定向登录
+      if (localStorage.getItem('auth_redirect_pending') === 'true') {
+        console.log('[FirebaseService] 检测到待处理的重定向登录，尝试获取结果');
+        try {
+          const result = await firebase.auth().getRedirectResult();
+          localStorage.removeItem('auth_redirect_pending');
+          
+          if (result && result.user) {
+            console.log('[FirebaseService] 重定向登录成功');
+            this.saveCurrentUser(result.user);
+            // 触发登录成功事件
+            window.dispatchEvent(new CustomEvent('auth:login', { detail: { user: result.user } }));
+            
+            // 显示成功消息
+            setTimeout(() => {
+              alert('Google登录成功!');
+            }, 1000);
+          } else {
+            console.log('[FirebaseService] 重定向登录未返回用户');
+          }
+        } catch (redirectError) {
+          console.error('[FirebaseService] 处理重定向结果出错:', redirectError);
+          localStorage.removeItem('auth_redirect_pending');
+          
+          // 显示错误消息
+          setTimeout(() => {
+            alert('Google登录失败: ' + redirectError.message);
+          }, 1000);
+        }
+      }
+
       // 监听认证状态变化
       this.auth.onAuthStateChanged((user) => {
         console.log('[FirebaseService] 认证状态变化', user ? '已登录' : '未登录');
@@ -260,27 +291,48 @@ class FirebaseServiceClass {
       // 创建Google提供者
       const provider = new firebase.auth.GoogleAuthProvider();
       
-      // 使用弹窗方式登录
-      console.log('[FirebaseService] 尝试Google登录...');
-      const result = await firebase.auth().signInWithPopup(provider);
+      // 检测是否为移动设备
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
       
-      if (result && result.user) {
-        console.log('[FirebaseService] Google登录成功');
-        this.saveCurrentUser(result.user);
-        return {
-          success: true,
-          user: {
-            uid: result.user.uid,
-            email: result.user.email,
-            displayName: result.user.displayName
-          }
-        };
+      console.log(`[FirebaseService] 尝试Google登录... 设备类型: ${isMobile ? '移动设备' : '桌面设备'}`);
+      
+      // 移动设备使用重定向方式，桌面设备使用弹窗方式
+      if (isMobile) {
+        // 在移动设备上使用重定向方法
+        console.log('[FirebaseService] 使用重定向方式登录');
+        
+        // 保存当前状态，以便重定向回来后恢复
+        localStorage.setItem('auth_redirect_pending', 'true');
+        
+        // 使用重定向方法登录
+        await firebase.auth().signInWithRedirect(provider);
+        
+        // 注意：这里之后的代码不会立即执行，因为页面会重定向
+        // 处理结果的逻辑应该放在页面加载时检查
+        return { success: true, pending: true };
       } else {
-        console.error('[FirebaseService] Google登录结果无效');
-        return {
-          success: false,
-          error: '登录结果无效'
-        };
+        // 在桌面设备上使用弹窗方法
+        console.log('[FirebaseService] 使用弹窗方式登录');
+        const result = await firebase.auth().signInWithPopup(provider);
+        
+        if (result && result.user) {
+          console.log('[FirebaseService] Google登录成功');
+          this.saveCurrentUser(result.user);
+          return {
+            success: true,
+            user: {
+              uid: result.user.uid,
+              email: result.user.email,
+              displayName: result.user.displayName
+            }
+          };
+        } else {
+          console.error('[FirebaseService] Google登录结果无效');
+          return {
+            success: false,
+            error: '登录结果无效'
+          };
+        }
       }
     } catch (error) {
       console.error('[FirebaseService] Google登录失败', error);

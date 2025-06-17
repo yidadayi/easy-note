@@ -322,14 +322,21 @@ class AuthUIClass {
       const result = await window.FirebaseService.loginWithGoogle();
       
       if (result.success) {
-        console.log('[AuthUI] Google登录成功');
-        this.currentUser = result.user;
-        this.authModal.hide();
-        this.updateAuthUI();
-        this.showSuccess('Google登录成功');
-        
-        // 触发登录成功事件
-        window.dispatchEvent(new CustomEvent('auth:login', { detail: result.user }));
+        if (result.pending) {
+          // 在移动设备上，这里不会立即执行，因为页面会重定向
+          console.log('[AuthUI] Google登录重定向中，等待重定向完成');
+          // 不需要做任何事，页面会重定向，之后的代码会在重定向回来后执行
+        } else {
+          // 桌面设备上的弹窗登录
+          console.log('[AuthUI] Google登录成功');
+          this.currentUser = result.user;
+          this.authModal.hide();
+          this.updateAuthUI();
+          this.showSuccess('Google登录成功');
+          
+          // 触发登录成功事件
+          window.dispatchEvent(new CustomEvent('auth:login', { detail: result.user }));
+        }
       } else {
         console.error('[AuthUI] Google登录失败', result.error);
         this.showError('Google登录失败: ' + result.error);
