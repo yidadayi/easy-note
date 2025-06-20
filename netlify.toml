@@ -11,4 +11,17 @@
   from = "/__/auth/*"
   to = "https://easy-note-a5c2f.firebaseapp.com/__/auth/:splat"
   status = 200
-  force = true 
+  force = true
+
+# 确保Firebase身份验证重定向能够正常工作
+[[redirects]]
+  from = "/auth/*"
+  to = "https://easy-note-a5c2f.firebaseapp.com/auth/:splat"
+  status = 200
+  force = true
+
+# 确保所有路由都回到index.html，以支持SPA路由
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200 

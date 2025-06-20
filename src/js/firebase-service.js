@@ -468,11 +468,32 @@ class FirebaseServiceClass {
       const isLocalIP = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/i.test(window.location.hostname);
       const isIPAddress = isLocalIP || /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname);
       
-      // 对于所有Android设备，始终使用弹窗方式登录
-      // 这是为了解决Android设备上的第三方Cookie限制问题
+      // 对于Android设备，始终使用弹窗方式登录
       if (isAndroid) {
         console.log('[FirebaseService] 检测到Android设备，使用弹窗方式登录');
+        
         try {
+          // 确保使用正确的authDomain
+          if (window.FIREBASE_CONFIG.authDomain !== window.location.hostname && 
+              window.location.hostname !== 'localhost' && 
+              window.location.hostname !== '127.0.0.1') {
+            console.log('[FirebaseService] 更新authDomain为当前主机名');
+            // 临时更新配置中的authDomain为当前主机名
+            window.FIREBASE_CONFIG.authDomain = window.location.hostname;
+            
+            // 重新初始化Firebase以应用新的authDomain
+            try {
+              await this.auth.app.delete();
+              this.app = firebase.initializeApp(window.FIREBASE_CONFIG);
+              this.auth = this.app.auth();
+              console.log('[FirebaseService] 使用更新后的authDomain重新初始化Firebase');
+            } catch (reInitError) {
+              console.error('[FirebaseService] 重新初始化Firebase失败:', reInitError);
+            }
+          }
+          
+          // 显式使用弹窗方法
+          console.log('[FirebaseService] 尝试使用signInWithPopup方法');
           const result = await this.auth.signInWithPopup(provider);
           
           if (result && result.user) {
@@ -487,7 +508,8 @@ class FirebaseServiceClass {
               user: {
                 uid: result.user.uid,
                 email: result.user.email,
-                displayName: result.user.displayName
+                displayName: result.user.displayName,
+                photoURL: result.user.photoURL
               }
             };
           } else {
@@ -500,6 +522,31 @@ class FirebaseServiceClass {
         } catch (error) {
           console.error('[FirebaseService] Android弹窗登录失败', error);
           
+          // 如果弹窗方法失败，尝试使用重定向方法
+          if (error.code === 'auth/popup-blocked' || error.code === 'auth/popup-closed-by-user') {
+            console.log('[FirebaseService] 弹窗被阻止或关闭，尝试使用重定向方法');
+            try {
+              // 保存当前URL到localStorage，以便登录后返回
+              localStorage.setItem('auth_return_url', window.location.href);
+              
+              // 保存状态，以便重定向回来后恢复
+              localStorage.setItem('auth_redirect_pending', 'true');
+              localStorage.setItem('auth_redirect_time', Date.now().toString());
+              
+              // 使用重定向方法登录
+              await this.auth.signInWithRedirect(provider);
+              
+              return { success: true, pending: true };
+            } catch (redirectError) {
+              console.error('[FirebaseService] 重定向方法也失败了', redirectError);
+              return {
+                success: false,
+                error: `登录失败: ${redirectError.message || '未知错误'}`,
+                errorCode: redirectError.code
+              };
+            }
+          }
+          
           // 提供更具体的错误信息
           let errorMessage = '登录失败';
           if (error.code === 'auth/popup-blocked') {
@@ -509,7 +556,14 @@ class FirebaseServiceClass {
           } else if (error.code === 'auth/network-request-failed') {
             errorMessage = '网络请求失败，请检查您的网络连接并重试。';
           } else if (error.code === 'auth/unauthorized-domain') {
-            errorMessage = '当前域名未被授权使用Firebase认证。请联系应用管理员。';
+            errorMessage = '当前域名未被授权使用Firebase认证。请确保已在Firebase控制台添加此域名到授权域列表。';
+            console.error(`[FirebaseService] 当前域名 ${window.location.hostname} 未在Firebase授权域名列表中`);
+          } else if (error.code === 'auth/cancelled-popup-request') {
+            errorMessage = '登录请求已取消。请重新尝试。';
+          } else if (error.code === 'auth/user-disabled') {
+            errorMessage = '此用户账号已被禁用。请联系管理员。';
+          } else if (error.code === 'auth/operation-not-allowed') {
+            errorMessage = 'Google登录方式未在Firebase控制台中启用。';
           } else {
             errorMessage = `登录失败: ${error.message || '未知错误'}`;
           }
@@ -523,8 +577,8 @@ class FirebaseServiceClass {
       }
       
       // 其他设备使用原来的逻辑：手机设备使用重定向方式，桌面设备使用弹窗方式
-      if (isMobile) {
-        // 在手机设备上使用重定向方法
+      if (isMobile && !isAndroid) {
+        // 在非Android手机设备上使用重定向方法
         console.log('[FirebaseService] 使用重定向方式登录');
         
         // 保存当前URL到localStorage，以便登录后返回
@@ -558,7 +612,8 @@ class FirebaseServiceClass {
                   user: {
                     uid: result.user.uid,
                     email: result.user.email,
-                    displayName: result.user.displayName
+                    displayName: result.user.displayName,
+                    photoURL: result.user.photoURL
                   }
                 };
               }
@@ -591,7 +646,8 @@ class FirebaseServiceClass {
               user: {
                 uid: result.user.uid,
                 email: result.user.email,
-                displayName: result.user.displayName
+                displayName: result.user.displayName,
+                photoURL: result.user.photoURL
               }
             };
           } else {

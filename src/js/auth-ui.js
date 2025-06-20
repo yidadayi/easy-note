@@ -330,28 +330,46 @@ class AuthUIClass {
       return;
     }
     
-    // 显示模态框前更新UI
-    this.updateAuthUI();
-    
-    // 检查是否为内网环境下的Android设备
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    const isChrome = /Chrome/i.test(navigator.userAgent);
-    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const isLocalIP = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/i.test(window.location.hostname);
-    const isIPAddress = isLocalIP || /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname);
-    
-    // 显示Android设备在IP地址上的警告
-    const androidLoginOptions = document.getElementById('androidLoginOptions');
-    if (androidLoginOptions) {
-      if (isAndroid && isChrome && isIPAddress && !isLocalhost) {
-        androidLoginOptions.classList.remove('d-none');
-      } else {
-        androidLoginOptions.classList.add('d-none');
+    try {
+      // 显示模态框前更新UI
+      this.updateAuthUI();
+      
+      // 检查是否为内网环境下的Android设备
+      const isAndroid = /Android/i.test(navigator.userAgent);
+      const isChrome = /Chrome/i.test(navigator.userAgent);
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const isLocalIP = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/i.test(window.location.hostname);
+      const isIPAddress = isLocalIP || /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname);
+      
+      // 显示Android设备在IP地址上的警告
+      const androidLoginOptions = document.getElementById('androidLoginOptions');
+      if (androidLoginOptions) {
+        if (isAndroid && isChrome && isIPAddress && !isLocalhost) {
+          androidLoginOptions.classList.remove('d-none');
+        } else {
+          androidLoginOptions.classList.add('d-none');
+        }
+      }
+      
+      this.authModal.show();
+      console.log('[AuthUI] 显示登录模态框');
+    } catch (error) {
+      console.error('[AuthUI] 显示模态框时出错:', error);
+      // 尝试重新初始化模态框
+      try {
+        const firebaseAuthModalElement = document.getElementById('firebaseAuthModal');
+        if (firebaseAuthModalElement) {
+          this.authModal = new bootstrap.Modal(firebaseAuthModalElement);
+          this.authModal.show();
+        } else {
+          console.error('[AuthUI] 找不到firebaseAuthModal元素');
+          alert('错误: 找不到登录模态框元素');
+        }
+      } catch (retryError) {
+        console.error('[AuthUI] 重新初始化模态框失败:', retryError);
+        alert('无法显示登录窗口，请刷新页面后重试');
       }
     }
-    
-    this.authModal.show();
-    console.log('[AuthUI] 显示登录模态框');
   }
 
   /**

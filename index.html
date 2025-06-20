@@ -378,6 +378,25 @@
             messagingSenderId: "1035389970323",
             appId: "1:1035389970323:web:c4e38c5b7a2d2c9d6c8a7e"
         };
+
+        // 检测设备类型
+        const isAndroid = /Android/i.test(navigator.userAgent);
+        const isChrome = /Chrome/i.test(navigator.userAgent);
+        
+        // 如果是Android Chrome，记录一些调试信息
+        if (isAndroid && isChrome) {
+            console.log('[Firebase初始化] 检测到Android Chrome设备');
+            console.log('[Firebase初始化] 使用的authDomain:', window.FIREBASE_CONFIG.authDomain);
+            console.log('[Firebase初始化] 当前主机名:', window.location.hostname);
+            
+            // 确保使用当前域名作为authDomain
+            if (window.location.hostname && 
+                window.location.hostname !== 'localhost' && 
+                window.location.hostname !== '127.0.0.1') {
+                window.FIREBASE_CONFIG.authDomain = window.location.hostname;
+                console.log('[Firebase初始化] 已更新authDomain为当前主机名:', window.FIREBASE_CONFIG.authDomain);
+            }
+        }
     </script>
     <script src="src/js/firebase-service.js"></script>
     <script src="src/js/ui-controller.js"></script>
