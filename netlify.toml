@@ -2,6 +2,12 @@
   functions = "netlify/functions"
 
 [[redirects]]
+  from = "/__/auth/*"
+  to = "https://easy-note-a5c2f.firebaseapp.com/__/auth/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
   from = ".netlify/functions/*"
   to = ".netlify/functions/:splat"
   status = 200

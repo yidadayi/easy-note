@@ -499,7 +499,44 @@ class FirebaseServiceClass {
         };
       }
       
-      // 手机设备使用重定向方式，桌面设备使用弹窗方式
+      // 对于Android Chrome设备，始终使用弹窗方式登录，避免重定向问题
+      if (isAndroid && isChrome) {
+        console.log('[FirebaseService] 检测到Android Chrome设备，使用弹窗方式登录以避免重定向问题');
+        try {
+          const result = await this.auth.signInWithPopup(provider);
+          
+          if (result && result.user) {
+            console.log('[FirebaseService] Google登录成功，用户：', result.user.email);
+            this.saveCurrentUser(result.user);
+            
+            // 确保云同步启用
+            localStorage.setItem('easy_note_cloud_sync', 'true');
+            
+            return {
+              success: true,
+              user: {
+                uid: result.user.uid,
+                email: result.user.email,
+                displayName: result.user.displayName
+              }
+            };
+          } else {
+            console.error('[FirebaseService] Google登录结果无效');
+            return {
+              success: false,
+              error: '登录结果无效'
+            };
+          }
+        } catch (error) {
+          console.error('[FirebaseService] Android Chrome弹窗登录失败', error);
+          return {
+            success: false,
+            error: '登录失败: ' + (error.message || '未知错误')
+          };
+        }
+      }
+      
+      // 其他设备使用原来的逻辑：手机设备使用重定向方式，桌面设备使用弹窗方式
       if (isMobile) {
         // 在手机设备上使用重定向方法
         console.log('[FirebaseService] 使用重定向方式登录');

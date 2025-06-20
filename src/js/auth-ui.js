@@ -391,31 +391,16 @@ class AuthUIClass {
       const isLocalIP = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/i.test(window.location.hostname);
       const isIPAddress = isLocalIP || /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname);
       
-      // 提前检查Android Chrome在IP地址上的限制
-      if (isAndroid && isChrome && isIPAddress && !isLocalhost) {
-        console.warn('[AuthUI] Android Chrome在IP地址上不支持Google登录，显示警告并建议替代方案');
-        this.showError('Android Chrome不支持在IP地址上进行Google登录。请尝试使用localhost访问或使用桌面浏览器。');
-        
-        // 显示替代登录选项
-        const androidLoginOptions = document.getElementById('androidLoginOptions');
-        if (androidLoginOptions) {
-          androidLoginOptions.classList.remove('d-none');
-        }
-        
-        // 不继续执行Google登录流程
-        return;
-      }
-      
       // 禁用按钮
       if (this.googleLoginBtn) {
         this.googleLoginBtn.disabled = true;
         this.googleLoginBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 登录中...';
       }
       
-      // 在Android设备上显示特殊说明
+      // 在Android Chrome设备上显示特殊说明
       if (isAndroid && isChrome) {
-        // 通知用户可能会跳转到Google登录页面
-        this.showToast('即将跳转到Google登录页面，登录成功后会自动返回。如果长时间未返回，请手动返回此页面。', 5000);
+        // 通知用户将使用弹窗方式登录
+        this.showToast('即将打开Google登录弹窗，请在弹窗中完成登录。如果没有弹窗出现，请检查您的浏览器是否阻止了弹窗。', 5000);
       }
       
       // 清除之前可能存在的登录状态
