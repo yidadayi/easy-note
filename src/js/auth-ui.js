@@ -397,10 +397,16 @@ class AuthUIClass {
         this.googleLoginBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 登录中...';
       }
       
-      // 在Android Chrome设备上显示特殊说明
-      if (isAndroid && isChrome) {
+      // 显示Android设备特殊说明
+      if (isAndroid) {
         // 通知用户将使用弹窗方式登录
         this.showToast('即将打开Google登录弹窗，请在弹窗中完成登录。如果没有弹窗出现，请检查您的浏览器是否阻止了弹窗。', 5000);
+        
+        // 显示Android设备登录选项
+        const androidLoginOptions = document.getElementById('androidLoginOptions');
+        if (androidLoginOptions) {
+          androidLoginOptions.classList.remove('d-none');
+        }
       }
       
       // 清除之前可能存在的登录状态
@@ -416,10 +422,10 @@ class AuthUIClass {
           // 在移动设备上，这里不会立即执行，因为页面会重定向
           console.log('[AuthUI] Google登录重定向中，等待重定向完成');
           
-          // 对于Android设备，检查是否实际上未发生重定向
-          if (isAndroid) {
+          // 对于移动设备，检查是否实际上未发生重定向
+          if (isMobile) {
             // 如果代码执行到这里，可能意味着重定向没有发生
-            console.warn('[AuthUI] 检测到Android设备上重定向可能未发生');
+            console.warn('[AuthUI] 检测到移动设备上重定向可能未发生');
             
             // 给用户一些反馈
             setTimeout(() => {
@@ -440,7 +446,7 @@ class AuthUIClass {
             }, 5000);
           }
         } else {
-          // 桌面设备上的弹窗登录
+          // 弹窗登录成功
           console.log('[AuthUI] Google登录成功');
           this.currentUser = result.user;
           this.authModal.hide();
@@ -455,40 +461,38 @@ class AuthUIClass {
         
         // 处理特定错误代码
         if (result.errorCode === 'android_ip_restriction') {
-          console.warn('[AuthUI] Android Chrome设备在IP地址上不支持Google登录');
+          console.warn('[AuthUI] Android设备在IP地址上不支持Google登录');
           
           // 显示替代登录选项
           const androidLoginOptions = document.getElementById('androidLoginOptions');
           if (androidLoginOptions) {
             androidLoginOptions.classList.remove('d-none');
           }
-          
-          this.showError(result.error);
-        } else {
-          this.showError('Google登录失败: ' + result.error);
-        }
-        
-        // 如果是授权域问题，提供更具体的指导
-        if (result.error.includes('unauthorized-domain')) {
+        } else if (result.errorCode === 'auth/popup-blocked') {
+          this.showError('登录弹窗被浏览器阻止。请允许弹窗后重试，或尝试使用其他浏览器。');
+        } else if (result.errorCode === 'auth/unauthorized-domain') {
           this.showError('当前网址未被Firebase授权，请在Firebase控制台中添加此域名到授权域列表中。');
           console.error(`[AuthUI] 当前域名 ${window.location.hostname} 未在Firebase授权域名列表中`);
+        } else {
+          this.showError(result.error || 'Google登录失败，请稍后重试');
         }
       }
     } catch (error) {
       console.error('[AuthUI] Google登录过程中发生错误', error);
-      this.showError('Google登录过程中发生错误: ' + error.message);
       
-      // 检查特定错误类型
+      // 检查特定错误类型并提供明确的错误信息
       if (error.code === 'auth/popup-blocked') {
         this.showError('登录弹窗被浏览器阻止，请允许弹窗后重试');
       } else if (error.code === 'auth/popup-closed-by-user') {
-        this.showError('登录弹窗被关闭');
+        this.showError('登录弹窗被关闭，请完成登录过程');
       } else if (error.code === 'auth/cancelled-popup-request') {
         this.showError('登录请求已取消');
       } else if (error.code === 'auth/network-request-failed') {
         this.showError('网络请求失败，请检查您的网络连接');
       } else if (error.code === 'auth/unauthorized-domain') {
         this.showError('当前域名未被授权使用Firebase认证');
+      } else {
+        this.showError('Google登录过程中发生错误: ' + (error.message || '未知错误'));
       }
     } finally {
       // 启用按钮

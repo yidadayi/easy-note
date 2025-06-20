@@ -446,8 +446,6 @@ class FirebaseServiceClass {
       console.log(`[FirebaseService] 设备信息: 移动=${isMobile}, Android=${isAndroid}, Chrome=${isChrome}`);
       console.log(`[FirebaseService] 用户代理: ${navigator.userAgent}`);
       console.log(`[FirebaseService] 当前URL: ${window.location.href}`);
-      
-      // 检查Firebase配置
       console.log(`[FirebaseService] Firebase配置: authDomain=${window.FIREBASE_CONFIG.authDomain}`);
       
       // 确保Firebase已初始化
@@ -465,43 +463,15 @@ class FirebaseServiceClass {
         };
       }
       
-      // 对于本地IP运行的情况特殊处理
+      // 检查是否为本地IP或域名
       const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       const isLocalIP = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/i.test(window.location.hostname);
       const isIPAddress = isLocalIP || /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname);
       
-      if (isIPAddress) {
-        console.warn('[FirebaseService] 检测到应用运行在IP地址上，这可能导致OAuth重定向问题');
-        
-        if (isAndroid && isChrome) {
-          console.warn('[FirebaseService] 检测到Android Chrome - 由于安全限制，Google登录在IP地址上可能不可用');
-          
-          // 对于Android Chrome在IP地址上的情况，直接返回特定错误，避免尝试注定会失败的登录流程
-          if (!isLocalhost) {
-            console.error('[FirebaseService] Android Chrome不支持在非localhost的IP地址上进行Google OAuth登录');
-            return {
-              success: false,
-              error: 'Android Chrome设备不支持在IP地址上进行Google登录。请使用邮箱密码登录，或使用localhost访问，或在桌面浏览器上访问。',
-              errorCode: 'android_ip_restriction'
-            };
-          }
-        }
-      }
-      
-      // 为Android Chrome设备提供明确的引导
-      if (isAndroid && isChrome && isIPAddress && !isLocalhost) {
-        // 尝试使用邮箱密码登录的提示已经在上面返回了
-        console.log('[FirebaseService] 已对Android Chrome设备返回特定错误消息');
-        return {
-          success: false,
-          error: 'Android Chrome设备不支持在IP地址上进行Google登录。请使用邮箱密码登录，或使用localhost访问，或在桌面浏览器上访问。',
-          errorCode: 'android_ip_restriction'
-        };
-      }
-      
-      // 对于Android Chrome设备，始终使用弹窗方式登录，避免重定向问题
-      if (isAndroid && isChrome) {
-        console.log('[FirebaseService] 检测到Android Chrome设备，使用弹窗方式登录以避免重定向问题');
+      // 对于所有Android设备，始终使用弹窗方式登录
+      // 这是为了解决Android设备上的第三方Cookie限制问题
+      if (isAndroid) {
+        console.log('[FirebaseService] 检测到Android设备，使用弹窗方式登录');
         try {
           const result = await this.auth.signInWithPopup(provider);
           
@@ -528,10 +498,26 @@ class FirebaseServiceClass {
             };
           }
         } catch (error) {
-          console.error('[FirebaseService] Android Chrome弹窗登录失败', error);
+          console.error('[FirebaseService] Android弹窗登录失败', error);
+          
+          // 提供更具体的错误信息
+          let errorMessage = '登录失败';
+          if (error.code === 'auth/popup-blocked') {
+            errorMessage = '登录弹窗被浏览器阻止。请允许弹窗后重试，或尝试使用其他浏览器。';
+          } else if (error.code === 'auth/popup-closed-by-user') {
+            errorMessage = '登录弹窗被关闭。请完成登录过程。';
+          } else if (error.code === 'auth/network-request-failed') {
+            errorMessage = '网络请求失败，请检查您的网络连接并重试。';
+          } else if (error.code === 'auth/unauthorized-domain') {
+            errorMessage = '当前域名未被授权使用Firebase认证。请联系应用管理员。';
+          } else {
+            errorMessage = `登录失败: ${error.message || '未知错误'}`;
+          }
+          
           return {
             success: false,
-            error: '登录失败: ' + (error.message || '未知错误')
+            error: errorMessage,
+            errorCode: error.code
           };
         }
       }
@@ -549,34 +535,8 @@ class FirebaseServiceClass {
         localStorage.setItem('auth_redirect_time', Date.now().toString());
         
         try {
-          // 先清除可能存在的会话
-          if (isAndroid) {
-            console.log('[FirebaseService] Android设备，尝试先清除之前的登录状态');
-            try {
-              await this.auth.signOut();
-              console.log('[FirebaseService] 成功清除旧登录状态');
-            } catch (e) {
-              console.log('[FirebaseService] 清除之前登录状态时出错，继续执行', e);
-            }
-          }
-          
           // 使用重定向方法登录
           console.log('[FirebaseService] 执行重定向登录，即将跳转...');
-          
-          // 诊断模式：输出即将重定向的信息
-          if (isAndroid && isChrome) {
-            console.log('[FirebaseService] 即将在Android Chrome上执行重定向');
-            console.log(`[FirebaseService] 应用ID: ${window.FIREBASE_CONFIG.appId}`);
-            console.log(`[FirebaseService] 项目ID: ${window.FIREBASE_CONFIG.projectId}`);
-            
-            // 使用fetch API测试网络连通性
-            try {
-              const testResponse = await fetch('https://www.google.com/generate_204', { mode: 'no-cors' });
-              console.log('[FirebaseService] 网络连通性测试完成');
-            } catch (networkErr) {
-              console.error('[FirebaseService] 网络连通性测试失败:', networkErr);
-            }
-          }
           
           // 使用更明确的错误处理
           try {
@@ -604,31 +564,11 @@ class FirebaseServiceClass {
               }
             } catch (popupError) {
               console.error('[FirebaseService] 弹窗方法也失败了', popupError);
-              
-              // 检查是否是Android Chrome上的IP访问问题
-              if (isAndroid && isChrome && isIPAddress && !isLocalhost) {
-                return {
-                  success: false,
-                  error: 'Android Chrome设备不支持在IP地址上进行Google登录。请使用邮箱密码登录，或使用localhost访问，或在桌面浏览器上访问。',
-                  errorCode: 'android_ip_restriction'
-                };
-              }
-              
               throw new Error(`登录失败: ${redirectError.message} 和 ${popupError.message}`);
             }
           }
         } catch (error) {
           console.error('[FirebaseService] 登录过程中发生错误:', error);
-          
-          // 特殊处理Android Chrome上的问题
-          if (isAndroid && isChrome && isIPAddress && !isLocalhost) {
-            return {
-              success: false,
-              error: 'Android Chrome设备不支持在IP地址上进行Google登录。请使用邮箱密码登录，或使用localhost访问，或在桌面浏览器上访问。',
-              errorCode: 'android_ip_restriction'
-            };
-          }
-          
           throw error;
         }
         
@@ -636,28 +576,48 @@ class FirebaseServiceClass {
       } else {
         // 在桌面设备上使用弹窗方法
         console.log('[FirebaseService] 使用弹窗方式登录');
-        const result = await this.auth.signInWithPopup(provider);
-        
-        if (result && result.user) {
-          console.log('[FirebaseService] Google登录成功，用户：', result.user.email);
-          this.saveCurrentUser(result.user);
+        try {
+          const result = await this.auth.signInWithPopup(provider);
           
-          // 确保云同步启用
-          localStorage.setItem('easy_note_cloud_sync', 'true');
+          if (result && result.user) {
+            console.log('[FirebaseService] Google登录成功，用户：', result.user.email);
+            this.saveCurrentUser(result.user);
+            
+            // 确保云同步启用
+            localStorage.setItem('easy_note_cloud_sync', 'true');
+            
+            return {
+              success: true,
+              user: {
+                uid: result.user.uid,
+                email: result.user.email,
+                displayName: result.user.displayName
+              }
+            };
+          } else {
+            console.error('[FirebaseService] Google登录结果无效');
+            return {
+              success: false,
+              error: '登录结果无效'
+            };
+          }
+        } catch (error) {
+          console.error('[FirebaseService] 桌面设备弹窗登录失败', error);
           
-          return {
-            success: true,
-            user: {
-              uid: result.user.uid,
-              email: result.user.email,
-              displayName: result.user.displayName
-            }
-          };
-        } else {
-          console.error('[FirebaseService] Google登录结果无效');
+          // 提供更具体的错误信息
+          let errorMessage = '登录失败';
+          if (error.code === 'auth/popup-blocked') {
+            errorMessage = '登录弹窗被浏览器阻止。请允许弹窗后重试。';
+          } else if (error.code === 'auth/popup-closed-by-user') {
+            errorMessage = '登录弹窗被关闭。请完成登录过程。';
+          } else {
+            errorMessage = `登录失败: ${error.message || '未知错误'}`;
+          }
+          
           return {
             success: false,
-            error: '登录结果无效'
+            error: errorMessage,
+            errorCode: error.code
           };
         }
       }
@@ -671,41 +631,10 @@ class FirebaseServiceClass {
         console.error(`[FirebaseService] 错误消息: ${error.message}`);
       }
       
-      // 显示更友好的错误消息
-      let errorMessage = '登录失败';
-      if (error.code === 'auth/popup-blocked') {
-        errorMessage = '登录弹窗被浏览器阻止，请允许弹窗后重试';
-      } else if (error.code === 'auth/popup-closed-by-user') {
-        errorMessage = '登录弹窗被关闭';
-      } else if (error.code === 'auth/cancelled-popup-request') {
-        errorMessage = '登录请求已取消';
-      } else if (error.code === 'auth/network-request-failed') {
-        errorMessage = '网络请求失败，请检查您的网络连接';
-      } else if (error.code === 'auth/unauthorized-domain') {
-        errorMessage = '当前域名未被授权使用Firebase认证';
-      } else {
-        errorMessage = error.message || '登录过程中发生未知错误';
-      }
-      
-      // 检查是否是Android Chrome设备在IP地址上的访问
-      const isAndroid = /Android/i.test(navigator.userAgent);
-      const isChrome = /Chrome/i.test(navigator.userAgent);
-      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      const isLocalIP = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/i.test(window.location.hostname);
-      const isIPAddress = isLocalIP || /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname);
-      
-      if (isAndroid && isChrome && isIPAddress && !isLocalhost) {
-        console.warn('[FirebaseService] 检测到Android Chrome设备在IP地址上访问，这是已知的问题');
-        return {
-          success: false,
-          error: 'Android Chrome设备不支持在IP地址上进行Google登录。请使用邮箱密码登录，或使用localhost访问，或在桌面浏览器上访问。',
-          errorCode: 'android_ip_restriction'
-        };
-      }
-      
       return {
         success: false,
-        error: errorMessage
+        error: `登录失败: ${error.message || '未知错误'}`,
+        errorCode: error.code
       };
     }
   }
