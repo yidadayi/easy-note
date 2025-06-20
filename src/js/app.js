@@ -8,6 +8,15 @@ document.addEventListener('DOMContentLoaded', async function() {
   console.log('Easy Note 应用初始化');
   
   try {
+    // 检测是否为Android设备
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    
+    // 检查是否是从Google登录重定向回来
+    const isRedirectLogin = localStorage.getItem('auth_redirect_pending') === 'true';
+    if (isRedirectLogin) {
+      console.log('检测到Google登录重定向回来，即将处理认证结果...');
+    }
+    
     // 初始化Firebase服务
     window.FirebaseService = new FirebaseServiceClass();
     await window.FirebaseService.init();
@@ -21,6 +30,37 @@ document.addEventListener('DOMContentLoaded', async function() {
     // 初始化认证UI
     window.AuthUI.initialize();
     console.log('认证UI初始化完成');
+    
+    // 从重定向登录回来，给予更多时间和多次检查机会
+    if (isRedirectLogin) {
+      console.log('处理重定向登录...');
+      
+      if (isAndroid) {
+        console.log('Android设备重定向，使用多阶段检查');
+        // 在Android上，多次检查用户状态
+        let attempts = 0;
+        while (attempts < 3 && !window.FirebaseService.getCurrentUser()) {
+          console.log(`等待登录完成 (${attempts + 1}/3)...`);
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          attempts++;
+        }
+      } else {
+        // 其他设备上，给Firebase足够的时间处理重定向结果
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      
+      // 无论结果如何，都重新检查用户状态
+      window.AuthUI.checkUserStatus();
+      
+      // 强制刷新页面状态
+      const currentUser = window.FirebaseService.getCurrentUser();
+      if (currentUser) {
+        console.log('重定向登录成功，用户:', currentUser.email);
+        localStorage.setItem('easy_note_cloud_sync', 'true');
+      } else {
+        console.log('重定向登录后未能检测到用户');
+      }
+    }
     
     // 初始化笔记服务
     window.NoteService = new NoteServiceClass();
@@ -39,6 +79,20 @@ document.addEventListener('DOMContentLoaded', async function() {
     console.log('UI事件初始化完成');
     
     console.log('Easy Note 应用初始化完成');
+    
+    // 最后的安全检查 - 确保UI反映正确的登录状态
+    setTimeout(() => {
+      const user = window.FirebaseService.getCurrentUser();
+      if (user) {
+        console.log('最终检查：用户已登录 -', user.email);
+        const syncStatus = document.getElementById('syncStatus');
+        if (syncStatus && syncStatus.innerHTML.includes('本地模式')) {
+          console.log('检测到UI状态不一致，强制更新UI');
+          window.AuthUI.currentUser = user;
+          window.AuthUI.updateAuthUI();
+        }
+      }
+    }, 5000);
   } catch (error) {
     console.error('应用初始化失败:', error);
     alert('应用初始化失败: ' + error.message);

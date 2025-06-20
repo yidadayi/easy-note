@@ -201,52 +201,55 @@
                         <!-- 错误消息提示区域 -->
                         <div id="authErrorMessage" class="alert alert-danger d-none"></div>
                         
-                        <ul class="nav nav-tabs" id="authTabs" role="tablist">
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link active" id="login-tab" data-bs-toggle="tab" data-bs-target="#login-tab-pane" type="button" role="tab" aria-controls="login-tab-pane" aria-selected="true">登录</button>
-                            </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" id="register-tab" data-bs-toggle="tab" data-bs-target="#register-tab-pane" type="button" role="tab" aria-controls="register-tab-pane" aria-selected="false">注册</button>
-                            </li>
-                        </ul>
-                        <div class="tab-content pt-3" id="authTabContent">
-                            <div class="tab-pane fade show active" id="login-tab-pane" role="tabpanel" aria-labelledby="login-tab" tabindex="0">
-                                <form id="loginForm">
-                                    <div class="mb-3">
-                                        <label for="loginEmail" class="form-label">邮箱</label>
-                                        <input type="email" class="form-control" id="loginEmail" required>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label for="loginPassword" class="form-label">密码</label>
-                                        <input type="password" class="form-control" id="loginPassword" required>
-                                    </div>
-                                    <div class="d-grid gap-2">
-                                        <button type="submit" class="btn btn-primary">登录</button>
-                                        <button type="button" id="googleLoginBtn" class="btn btn-outline-danger">
-                                            <i class="bi bi-google"></i> 使用 Google 账户登录
-                                        </button>
-                                    </div>
-                                </form>
+                        <!-- 环境检测警告 -->
+                        <div id="envWarning" class="alert alert-warning d-none">
+                            <strong>注意!</strong> <span id="envWarningMessage"></span>
+                        </div>
+                        
+                        <!-- 简化的登录界面 -->
+                        <div id="loginContainer">
+                            <!-- 登录状态显示 -->
+                            <div class="text-center mb-4">
+                                <div id="userAvatar" class="mb-3 d-none">
+                                    <img src="" alt="用户头像" class="rounded-circle" style="width: 64px; height: 64px;" id="userAvatarImg">
+                                </div>
+                                <div id="userInfo" class="mb-3 d-none">
+                                    <h5 id="userDisplayName">用户名</h5>
+                                    <p class="text-muted" id="userEmail">user@example.com</p>
+                                </div>
+                                <div id="loginStatusContainer" class="alert alert-info">
+                                    <span id="loginStatus">未登录</span>
+                                </div>
                             </div>
-                            <div class="tab-pane fade" id="register-tab-pane" role="tabpanel" aria-labelledby="register-tab" tabindex="0">
-                                <form id="registerForm">
-                                    <div class="mb-3">
-                                        <label for="registerEmail" class="form-label">邮箱</label>
-                                        <input type="email" class="form-control" id="registerEmail" required>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label for="registerPassword" class="form-label">密码</label>
-                                        <input type="password" class="form-control" id="registerPassword" required minlength="6">
-                                    </div>
-                                    <div class="mb-3">
-                                        <label for="confirmPassword" class="form-label">确认密码</label>
-                                        <input type="password" class="form-control" id="confirmPassword" required minlength="6">
-                                    </div>
-                                    <div class="d-grid">
-                                        <button type="submit" class="btn btn-primary">注册</button>
-                                    </div>
-                                </form>
+                            
+                            <!-- 未登录时显示Google登录按钮 -->
+                            <div id="loginButtonContainer" class="d-grid gap-2">
+                                <button type="button" id="googleLoginBtn" class="btn btn-danger">
+                                    <i class="bi bi-google"></i> 使用 Google 账户登录
+                                </button>
                             </div>
+                            
+                            <!-- 已登录时显示退出按钮 -->
+                            <div id="logoutButtonContainer" class="d-grid gap-2 d-none">
+                                <button type="button" id="logoutBtn" class="btn btn-outline-secondary">
+                                    <i class="bi bi-box-arrow-right"></i> 退出登录
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Android设备登录选项区域 -->
+                        <div id="androidLoginOptions" class="alert alert-warning mt-3 d-none">
+                            <p><strong>Android设备无法使用Google登录的解决方案：</strong></p>
+                            <ol>
+                                <li>使用localhost而非IP地址访问应用</li>
+                                <li>在桌面浏览器上使用此IP地址访问</li>
+                                <li>部署到真实域名后访问</li>
+                            </ol>
+                        </div>
+                        
+                        <!-- 网络状态显示 -->
+                        <div class="mt-4 text-center">
+                            <small class="text-muted">网络状态: <span id="networkStatus">检测中...</span></small>
                         </div>
                     </div>
                 </div>
@@ -297,6 +300,7 @@
                             <button class="nav-link active" id="logs-tab" data-bs-toggle="pill" data-bs-target="#logs" type="button" role="tab">日志</button>
                             <button class="nav-link" id="network-tab" data-bs-toggle="pill" data-bs-target="#network" type="button" role="tab">网络</button>
                             <button class="nav-link" id="storage-tab" data-bs-toggle="pill" data-bs-target="#storage" type="button" role="tab">存储</button>
+                            <button class="nav-link" id="env-tab" data-bs-toggle="pill" data-bs-target="#env" type="button" role="tab">环境</button>
                         </div>
                         <div class="tab-content flex-grow-1" id="debug-tabContent">
                             <div class="tab-pane fade show active" id="logs" role="tabpanel" aria-labelledby="logs-tab">
@@ -315,6 +319,30 @@
                                     <div class="mt-3">
                                         <button type="button" class="btn btn-sm btn-outline-danger" id="clearStorageBtn">
                                             清除所有存储数据
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="tab-pane fade" id="env" role="tabpanel" aria-labelledby="env-tab">
+                                <div class="p-3">
+                                    <h6>环境信息</h6>
+                                    <div id="envInfo" class="bg-light p-2 mb-3">
+                                        <div><strong>浏览器:</strong> <span id="browserInfo">-</span></div>
+                                        <div><strong>操作系统:</strong> <span id="osInfo">-</span></div>
+                                        <div><strong>设备类型:</strong> <span id="deviceInfo">-</span></div>
+                                        <div><strong>屏幕尺寸:</strong> <span id="screenInfo">-</span></div>
+                                        <div><strong>URL:</strong> <span id="urlInfo">-</span></div>
+                                        <div><strong>协议:</strong> <span id="protocolInfo">-</span></div>
+                                        <div><strong>主机名:</strong> <span id="hostnameInfo">-</span></div>
+                                        <div><strong>网络状态:</strong> <span id="networkInfo">-</span></div>
+                                    </div>
+                                    
+                                    <h6>Firebase配置</h6>
+                                    <pre id="firebaseConfigInfo" class="bg-light p-2">-</pre>
+                                    
+                                    <div class="mt-3">
+                                        <button type="button" class="btn btn-sm btn-outline-primary" id="refreshEnvInfoBtn">
+                                            刷新环境信息
                                         </button>
                                     </div>
                                 </div>
@@ -365,6 +393,134 @@
     <!-- 调试脚本 -->
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            // 网络状态监控
+            function updateNetworkStatus() {
+                const networkStatus = document.getElementById('networkStatus');
+                if (networkStatus) {
+                    networkStatus.textContent = navigator.onLine ? '在线' : '离线';
+                    networkStatus.classList.toggle('text-success', navigator.onLine);
+                    networkStatus.classList.toggle('text-danger', !navigator.onLine);
+                }
+            }
+            
+            // 首次更新网络状态
+            updateNetworkStatus();
+            
+            // 监听网络状态变化
+            window.addEventListener('online', updateNetworkStatus);
+            window.addEventListener('offline', updateNetworkStatus);
+            
+            // 更新环境信息
+            function updateEnvironmentInfo() {
+                // 浏览器信息
+                const browserInfo = document.getElementById('browserInfo');
+                if (browserInfo) {
+                    browserInfo.textContent = navigator.userAgent;
+                }
+                
+                // 操作系统信息
+                const osInfo = document.getElementById('osInfo');
+                if (osInfo) {
+                    const ua = navigator.userAgent;
+                    let os = 'Unknown';
+                    if (ua.indexOf('Windows') !== -1) os = 'Windows';
+                    else if (ua.indexOf('Mac') !== -1) os = 'MacOS';
+                    else if (ua.indexOf('Android') !== -1) os = 'Android';
+                    else if (ua.indexOf('iOS') !== -1 || ua.indexOf('iPhone') !== -1 || ua.indexOf('iPad') !== -1) os = 'iOS';
+                    else if (ua.indexOf('Linux') !== -1) os = 'Linux';
+                    osInfo.textContent = os;
+                }
+                
+                // 设备类型
+                const deviceInfo = document.getElementById('deviceInfo');
+                if (deviceInfo) {
+                    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                    deviceInfo.textContent = isMobile ? '移动设备' : '桌面设备';
+                }
+                
+                // 屏幕信息
+                const screenInfo = document.getElementById('screenInfo');
+                if (screenInfo) {
+                    screenInfo.textContent = `${window.innerWidth}x${window.innerHeight} (${window.screen.width}x${window.screen.height})`;
+                }
+                
+                // URL信息
+                const urlInfo = document.getElementById('urlInfo');
+                if (urlInfo) {
+                    urlInfo.textContent = window.location.href;
+                }
+                
+                // 协议信息
+                const protocolInfo = document.getElementById('protocolInfo');
+                if (protocolInfo) {
+                    protocolInfo.textContent = window.location.protocol;
+                }
+                
+                // 主机名信息
+                const hostnameInfo = document.getElementById('hostnameInfo');
+                if (hostnameInfo) {
+                    hostnameInfo.textContent = window.location.hostname;
+                }
+                
+                // 网络状态
+                const networkInfo = document.getElementById('networkInfo');
+                if (networkInfo) {
+                    networkInfo.textContent = navigator.onLine ? '在线' : '离线';
+                }
+                
+                // Firebase配置
+                const firebaseConfigInfo = document.getElementById('firebaseConfigInfo');
+                if (firebaseConfigInfo && window.FIREBASE_CONFIG) {
+                    // 创建配置副本并删除敏感信息
+                    const config = JSON.parse(JSON.stringify(window.FIREBASE_CONFIG));
+                    config.apiKey = '***隐藏敏感信息***';
+                    firebaseConfigInfo.textContent = JSON.stringify(config, null, 2);
+                }
+            }
+            
+            // 首次更新环境信息
+            updateEnvironmentInfo();
+            
+            // 刷新环境信息按钮
+            const refreshEnvInfoBtn = document.getElementById('refreshEnvInfoBtn');
+            if (refreshEnvInfoBtn) {
+                refreshEnvInfoBtn.addEventListener('click', updateEnvironmentInfo);
+            }
+            
+            // 环境警告检测
+            function checkEnvironmentWarnings() {
+                const envWarning = document.getElementById('envWarning');
+                const envWarningMessage = document.getElementById('envWarningMessage');
+                
+                if (!envWarning || !envWarningMessage) return;
+                
+                let warnings = [];
+                
+                // 检查是否使用内网IP
+                const isLocalIP = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/i.test(window.location.hostname);
+                const isAndroid = /Android/i.test(navigator.userAgent);
+                
+                if (isLocalIP && isAndroid) {
+                    warnings.push('检测到您正在Android设备上通过内网IP访问。Google登录可能无法正常工作，建议使用域名或localhost访问。');
+                }
+                
+                // 检查是否使用HTTPS
+                if (window.location.protocol !== 'https:') {
+                    warnings.push('当前使用的是非HTTPS连接，某些功能可能受限。');
+                }
+                
+                // 显示或隐藏警告
+                if (warnings.length > 0) {
+                    envWarningMessage.textContent = warnings.join(' ');
+                    envWarning.classList.remove('d-none');
+                } else {
+                    envWarning.classList.add('d-none');
+                }
+            }
+            
+            // 检查环境警告
+            checkEnvironmentWarnings();
+            
             // 测试syncStatus点击事件
             const syncStatus = document.getElementById('syncStatus');
             if (syncStatus) {
@@ -391,6 +547,47 @@
             } else {
                 console.error('未找到syncStatus元素');
             }
+            
+            // 邮箱登录按钮事件
+            const emailLoginBtn = document.getElementById('emailLoginBtn');
+            if (emailLoginBtn) {
+                emailLoginBtn.addEventListener('click', function() {
+                    const loginEmail = document.getElementById('loginEmail');
+                    const loginPassword = document.getElementById('loginPassword');
+                    
+                    if (loginEmail && loginPassword && loginEmail.value && loginPassword.value) {
+                        // 直接提交表单
+                        const loginForm = document.getElementById('loginForm');
+                        if (loginForm) {
+                            loginForm.dispatchEvent(new Event('submit'));
+                        }
+                    } else {
+                        alert('请先输入邮箱和密码');
+                    }
+                });
+            }
+            
+            // 登录状态更新
+            function updateLoginStatus() {
+                const loginStatus = document.getElementById('loginStatus');
+                if (loginStatus && window.FirebaseService) {
+                    const user = window.FirebaseService.getCurrentUser();
+                    if (user) {
+                        loginStatus.textContent = `已登录 (${user.email})`;
+                        loginStatus.classList.add('text-success');
+                    } else {
+                        loginStatus.textContent = '未登录';
+                        loginStatus.classList.remove('text-success');
+                    }
+                }
+            }
+            
+            // 监听登录事件
+            window.addEventListener('auth:login', updateLoginStatus);
+            window.addEventListener('auth:logout', updateLoginStatus);
+            
+            // 初始延迟更新登录状态
+            setTimeout(updateLoginStatus, 2000);
         });
     </script>
 </body>

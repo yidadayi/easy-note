@@ -24,41 +24,151 @@ class FirebaseServiceClass {
       // 已初始化，跳过
       if (this.initialized) return;
       
-      console.log('[FirebaseService] 初始化Firebase');
+      console.log('[FirebaseService] 初始化Firebase开始');
+      
+      // 检查Firebase SDK是否正确加载
+      if (typeof firebase === 'undefined') {
+        console.error('[FirebaseService] Firebase SDK未加载');
+        throw new Error('Firebase SDK未正确加载，请检查网络连接并刷新页面');
+      }
+      
       // 使用window.FIREBASE_CONFIG或firebaseConfig
       const config = window.FIREBASE_CONFIG || window.firebaseConfig;
-      this.app = firebase.initializeApp(config);
-      this.auth = firebase.auth();
-      this.db = firebase.firestore();
+      if (!config) {
+        console.error('[FirebaseService] Firebase配置未找到');
+        throw new Error('找不到Firebase配置信息');
+      }
+      
+      console.log('[FirebaseService] 配置信息:', JSON.stringify({
+        authDomain: config.authDomain,
+        projectId: config.projectId
+      }));
+      
+      try {
+        this.app = firebase.initializeApp(config);
+      } catch (initError) {
+        // 如果已经初始化，尝试获取已有的实例
+        if (initError.code === 'app/duplicate-app') {
+          console.warn('[FirebaseService] Firebase应用已存在，获取已有实例');
+          this.app = firebase.app();
+        } else {
+          throw initError;
+        }
+      }
+      
+      try {
+        this.auth = firebase.auth();
+        
+        // 检查auth对象
+        if (!this.auth) {
+          throw new Error('Firebase认证服务初始化失败');
+        }
+      } catch (authError) {
+        console.error('[FirebaseService] 认证服务初始化失败:', authError);
+        throw new Error('Firebase认证服务初始化失败: ' + authError.message);
+      }
+      
+      try {
+        this.db = firebase.firestore();
+        
+        // 检查db对象
+        if (!this.db) {
+          throw new Error('Firebase数据库服务初始化失败');
+        }
+      } catch (dbError) {
+        console.error('[FirebaseService] 数据库服务初始化失败:', dbError);
+        throw new Error('Firebase数据库服务初始化失败: ' + dbError.message);
+      }
+
+      // 增加登录持久性，避免移动端刷新后丢失登录状态
+      try {
+        await this.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+        console.log('[FirebaseService] 已设置登录持久性为LOCAL');
+      } catch (persistenceError) {
+        console.error('[FirebaseService] 设置登录持久性失败:', persistenceError);
+        // 继续执行，不抛出异常
+      }
 
       // 检查是否有待处理的重定向登录
-      if (localStorage.getItem('auth_redirect_pending') === 'true') {
+      const redirectPending = localStorage.getItem('auth_redirect_pending') === 'true';
+      const redirectTime = parseInt(localStorage.getItem('auth_redirect_time') || '0');
+      const currentTime = Date.now();
+      const redirectTimeout = 10 * 60 * 1000; // 10分钟超时
+      
+      // 如果重定向时间超过10分钟，认为重定向失败，清除状态
+      if (redirectPending && (currentTime - redirectTime > redirectTimeout)) {
+        console.warn('[FirebaseService] 检测到过期的重定向状态，自动清除');
+        localStorage.removeItem('auth_redirect_pending');
+        localStorage.removeItem('auth_redirect_time');
+      } else if (redirectPending) {
         console.log('[FirebaseService] 检测到待处理的重定向登录，尝试获取结果');
         try {
-          const result = await firebase.auth().getRedirectResult();
+          const result = await this.auth.getRedirectResult();
+          console.log('[FirebaseService] 重定向结果:', result ? '已接收' : '未接收');
+          
+          // 清除重定向状态
           localStorage.removeItem('auth_redirect_pending');
+          localStorage.removeItem('auth_redirect_time');
           
           if (result && result.user) {
-            console.log('[FirebaseService] 重定向登录成功');
+            console.log('[FirebaseService] 重定向登录成功，用户:', result.user.email);
+            this.currentUser = result.user;
             this.saveCurrentUser(result.user);
+            
+            // 显式强制设置云同步为启用
+            localStorage.setItem('easy_note_cloud_sync', 'true');
+            console.log('[FirebaseService] 已设置云同步为启用状态');
+            
             // 触发登录成功事件
-            window.dispatchEvent(new CustomEvent('auth:login', { detail: { user: result.user } }));
+            window.dispatchEvent(new CustomEvent('auth:login', { 
+              detail: { user: result.user }
+            }));
             
             // 显示成功消息
             setTimeout(() => {
               alert('Google登录成功!');
             }, 1000);
           } else {
-            console.log('[FirebaseService] 重定向登录未返回用户');
+            console.log('[FirebaseService] 重定向登录未返回用户，检查当前登录状态');
+            // 即使重定向结果中没有用户，仍然检查当前的认证状态
+            const currentUser = this.auth.currentUser;
+            if (currentUser) {
+              console.log('[FirebaseService] 但当前已有登录用户:', currentUser.email);
+              this.currentUser = currentUser;
+              this.saveCurrentUser(currentUser);
+              localStorage.setItem('easy_note_cloud_sync', 'true');
+              
+              window.dispatchEvent(new CustomEvent('auth:login', { 
+                detail: { user: currentUser } 
+              }));
+            } else {
+              console.warn('[FirebaseService] 重定向后没有检测到用户，可能登录失败');
+              
+              // 检查是否是从内网IP访问
+              const isLocalIP = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/i.test(window.location.hostname);
+              if (isLocalIP) {
+                console.warn('[FirebaseService] 检测到从内网IP访问，这可能是失败的原因');
+                setTimeout(() => {
+                  alert('Google登录失败。在内网环境下通过IP地址访问时，Google认证可能不可用。请考虑使用公网域名或localhost。');
+                }, 1000);
+              }
+            }
           }
         } catch (redirectError) {
           console.error('[FirebaseService] 处理重定向结果出错:', redirectError);
           localStorage.removeItem('auth_redirect_pending');
+          localStorage.removeItem('auth_redirect_time');
           
-          // 显示错误消息
-          setTimeout(() => {
-            alert('Google登录失败: ' + redirectError.message);
-          }, 1000);
+          if (redirectError.code === 'auth/network-request-failed') {
+            setTimeout(() => {
+              alert('Google登录失败: 网络请求失败，请检查您的网络连接');
+            }, 1000);
+          } else {
+            // 显示错误消息
+            setTimeout(() => {
+              alert('Google登录失败: ' + redirectError.message);
+            }, 1000);
+          }
         }
       }
 
@@ -70,11 +180,20 @@ class FirebaseServiceClass {
           console.log(`[FirebaseService] 用户已登录: ${user.email}`);
           this.currentUser = user;
           
+          // 确保云同步设置为启用
+          localStorage.setItem('easy_note_cloud_sync', 'true');
+          console.log('[FirebaseService] 已将云同步标记设为启用');
+          
           // 触发登录事件
           window.dispatchEvent(new CustomEvent('auth:login', { detail: { user } }));
           
           // 显示历史笔记链接
-          document.getElementById('userHistoryBar').classList.remove('d-none');
+          const userHistoryBar = document.getElementById('userHistoryBar');
+          if (userHistoryBar) {
+            userHistoryBar.classList.remove('d-none');
+          } else {
+            console.warn('[FirebaseService] 找不到userHistoryBar元素');
+          }
         } else {
           console.log('[FirebaseService] 用户未登录');
           this.currentUser = null;
@@ -83,13 +202,20 @@ class FirebaseServiceClass {
           window.dispatchEvent(new CustomEvent('auth:logout'));
           
           // 隐藏历史笔记链接
-          document.getElementById('userHistoryBar').classList.add('d-none');
+          const userHistoryBar = document.getElementById('userHistoryBar');
+          if (userHistoryBar) {
+            userHistoryBar.classList.add('d-none');
+          } else {
+            console.warn('[FirebaseService] 找不到userHistoryBar元素');
+          }
         }
       });
 
       this.initialized = true;
+      console.log('[FirebaseService] 初始化Firebase完成');
     } catch (error) {
       console.error('[FirebaseService] 初始化失败', error);
+      this.initialized = false; // 确保标记为未初始化
       throw error;
     }
   }
@@ -108,6 +234,15 @@ class FirebaseServiceClass {
     
     // 检查本地设置
     const cloudSyncEnabled = localStorage.getItem('easy_note_cloud_sync') === 'true';
+    
+    // 检查当前登录状态 - 如果已登录但未启用云同步，则自动启用
+    const firebaseUser = this.auth?.currentUser;
+    if (firebaseUser && !cloudSyncEnabled) {
+      console.log('[FirebaseService] 检测到用户已登录但云同步未启用，自动启用云同步');
+      localStorage.setItem('easy_note_cloud_sync', 'true');
+      return true;
+    }
+    
     if (!cloudSyncEnabled) {
       console.log('[FirebaseService] 云同步未在本地设置中启用');
       return false;
@@ -288,36 +423,191 @@ class FirebaseServiceClass {
    */
   async loginWithGoogle() {
     try {
+      console.log('[FirebaseService] 开始Google登录流程');
+      
       // 创建Google提供者
       const provider = new firebase.auth.GoogleAuthProvider();
       
-      // 检测是否为移动设备
+      // 添加附加OAuth范围
+      provider.addScope('profile');
+      provider.addScope('email');
+      
+      // 设置自定义参数以改善用户体验
+      provider.setCustomParameters({
+        'prompt': 'select_account',
+        'login_hint': this.currentUser?.email || ''
+      });
+      
+      // 检测是否为移动设备和平台
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const isAndroid = /Android/i.test(navigator.userAgent);
+      const isChrome = /Chrome/i.test(navigator.userAgent);
       
-      console.log(`[FirebaseService] 尝试Google登录... 设备类型: ${isMobile ? '移动设备' : '桌面设备'}`);
+      console.log(`[FirebaseService] 设备信息: 移动=${isMobile}, Android=${isAndroid}, Chrome=${isChrome}`);
+      console.log(`[FirebaseService] 用户代理: ${navigator.userAgent}`);
+      console.log(`[FirebaseService] 当前URL: ${window.location.href}`);
       
-      // 移动设备使用重定向方式，桌面设备使用弹窗方式
+      // 检查Firebase配置
+      console.log(`[FirebaseService] Firebase配置: authDomain=${window.FIREBASE_CONFIG.authDomain}`);
+      
+      // 确保Firebase已初始化
+      if (!this.initialized || !this.auth) {
+        console.log('[FirebaseService] Firebase未初始化，先进行初始化');
+        await this.init();
+      }
+      
+      // 检查当前网络状态
+      if (!navigator.onLine) {
+        console.error('[FirebaseService] 设备当前离线，无法进行Google登录');
+        return {
+          success: false,
+          error: '网络连接不可用，请检查您的网络连接后重试'
+        };
+      }
+      
+      // 对于本地IP运行的情况特殊处理
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const isLocalIP = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/i.test(window.location.hostname);
+      const isIPAddress = isLocalIP || /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname);
+      
+      if (isIPAddress) {
+        console.warn('[FirebaseService] 检测到应用运行在IP地址上，这可能导致OAuth重定向问题');
+        
+        if (isAndroid && isChrome) {
+          console.warn('[FirebaseService] 检测到Android Chrome - 由于安全限制，Google登录在IP地址上可能不可用');
+          
+          // 对于Android Chrome在IP地址上的情况，直接返回特定错误，避免尝试注定会失败的登录流程
+          if (!isLocalhost) {
+            console.error('[FirebaseService] Android Chrome不支持在非localhost的IP地址上进行Google OAuth登录');
+            return {
+              success: false,
+              error: 'Android Chrome设备不支持在IP地址上进行Google登录。请使用邮箱密码登录，或使用localhost访问，或在桌面浏览器上访问。',
+              errorCode: 'android_ip_restriction'
+            };
+          }
+        }
+      }
+      
+      // 为Android Chrome设备提供明确的引导
+      if (isAndroid && isChrome && isIPAddress && !isLocalhost) {
+        // 尝试使用邮箱密码登录的提示已经在上面返回了
+        console.log('[FirebaseService] 已对Android Chrome设备返回特定错误消息');
+        return {
+          success: false,
+          error: 'Android Chrome设备不支持在IP地址上进行Google登录。请使用邮箱密码登录，或使用localhost访问，或在桌面浏览器上访问。',
+          errorCode: 'android_ip_restriction'
+        };
+      }
+      
+      // 手机设备使用重定向方式，桌面设备使用弹窗方式
       if (isMobile) {
-        // 在移动设备上使用重定向方法
+        // 在手机设备上使用重定向方法
         console.log('[FirebaseService] 使用重定向方式登录');
         
-        // 保存当前状态，以便重定向回来后恢复
+        // 保存当前URL到localStorage，以便登录后返回
+        localStorage.setItem('auth_return_url', window.location.href);
+        
+        // 保存状态，以便重定向回来后恢复
         localStorage.setItem('auth_redirect_pending', 'true');
+        localStorage.setItem('auth_redirect_time', Date.now().toString());
         
-        // 使用重定向方法登录
-        await firebase.auth().signInWithRedirect(provider);
+        try {
+          // 先清除可能存在的会话
+          if (isAndroid) {
+            console.log('[FirebaseService] Android设备，尝试先清除之前的登录状态');
+            try {
+              await this.auth.signOut();
+              console.log('[FirebaseService] 成功清除旧登录状态');
+            } catch (e) {
+              console.log('[FirebaseService] 清除之前登录状态时出错，继续执行', e);
+            }
+          }
+          
+          // 使用重定向方法登录
+          console.log('[FirebaseService] 执行重定向登录，即将跳转...');
+          
+          // 诊断模式：输出即将重定向的信息
+          if (isAndroid && isChrome) {
+            console.log('[FirebaseService] 即将在Android Chrome上执行重定向');
+            console.log(`[FirebaseService] 应用ID: ${window.FIREBASE_CONFIG.appId}`);
+            console.log(`[FirebaseService] 项目ID: ${window.FIREBASE_CONFIG.projectId}`);
+            
+            // 使用fetch API测试网络连通性
+            try {
+              const testResponse = await fetch('https://www.google.com/generate_204', { mode: 'no-cors' });
+              console.log('[FirebaseService] 网络连通性测试完成');
+            } catch (networkErr) {
+              console.error('[FirebaseService] 网络连通性测试失败:', networkErr);
+            }
+          }
+          
+          // 使用更明确的错误处理
+          try {
+            await this.auth.signInWithRedirect(provider);
+            // 注意：这里之后的代码通常不会立即执行，因为页面会重定向
+            console.log('[FirebaseService] 重定向API调用成功，但页面未重定向？');
+          } catch (redirectError) {
+            console.error('[FirebaseService] 重定向方法失败，尝试弹窗方法', redirectError);
+            
+            // 如果重定向失败，尝试使用弹窗方法
+            try {
+              const result = await this.auth.signInWithPopup(provider);
+              if (result && result.user) {
+                console.log('[FirebaseService] 弹窗登录成功，用户：', result.user.email);
+                this.saveCurrentUser(result.user);
+                localStorage.setItem('easy_note_cloud_sync', 'true');
+                return {
+                  success: true,
+                  user: {
+                    uid: result.user.uid,
+                    email: result.user.email,
+                    displayName: result.user.displayName
+                  }
+                };
+              }
+            } catch (popupError) {
+              console.error('[FirebaseService] 弹窗方法也失败了', popupError);
+              
+              // 检查是否是Android Chrome上的IP访问问题
+              if (isAndroid && isChrome && isIPAddress && !isLocalhost) {
+                return {
+                  success: false,
+                  error: 'Android Chrome设备不支持在IP地址上进行Google登录。请使用邮箱密码登录，或使用localhost访问，或在桌面浏览器上访问。',
+                  errorCode: 'android_ip_restriction'
+                };
+              }
+              
+              throw new Error(`登录失败: ${redirectError.message} 和 ${popupError.message}`);
+            }
+          }
+        } catch (error) {
+          console.error('[FirebaseService] 登录过程中发生错误:', error);
+          
+          // 特殊处理Android Chrome上的问题
+          if (isAndroid && isChrome && isIPAddress && !isLocalhost) {
+            return {
+              success: false,
+              error: 'Android Chrome设备不支持在IP地址上进行Google登录。请使用邮箱密码登录，或使用localhost访问，或在桌面浏览器上访问。',
+              errorCode: 'android_ip_restriction'
+            };
+          }
+          
+          throw error;
+        }
         
-        // 注意：这里之后的代码不会立即执行，因为页面会重定向
-        // 处理结果的逻辑应该放在页面加载时检查
         return { success: true, pending: true };
       } else {
         // 在桌面设备上使用弹窗方法
         console.log('[FirebaseService] 使用弹窗方式登录');
-        const result = await firebase.auth().signInWithPopup(provider);
+        const result = await this.auth.signInWithPopup(provider);
         
         if (result && result.user) {
-          console.log('[FirebaseService] Google登录成功');
+          console.log('[FirebaseService] Google登录成功，用户：', result.user.email);
           this.saveCurrentUser(result.user);
+          
+          // 确保云同步启用
+          localStorage.setItem('easy_note_cloud_sync', 'true');
+          
           return {
             success: true,
             user: {
@@ -336,9 +626,49 @@ class FirebaseServiceClass {
       }
     } catch (error) {
       console.error('[FirebaseService] Google登录失败', error);
+      // 记录更详细的错误信息以便诊断
+      if (error.code) {
+        console.error(`[FirebaseService] 错误代码: ${error.code}`);
+      }
+      if (error.message) {
+        console.error(`[FirebaseService] 错误消息: ${error.message}`);
+      }
+      
+      // 显示更友好的错误消息
+      let errorMessage = '登录失败';
+      if (error.code === 'auth/popup-blocked') {
+        errorMessage = '登录弹窗被浏览器阻止，请允许弹窗后重试';
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        errorMessage = '登录弹窗被关闭';
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        errorMessage = '登录请求已取消';
+      } else if (error.code === 'auth/network-request-failed') {
+        errorMessage = '网络请求失败，请检查您的网络连接';
+      } else if (error.code === 'auth/unauthorized-domain') {
+        errorMessage = '当前域名未被授权使用Firebase认证';
+      } else {
+        errorMessage = error.message || '登录过程中发生未知错误';
+      }
+      
+      // 检查是否是Android Chrome设备在IP地址上的访问
+      const isAndroid = /Android/i.test(navigator.userAgent);
+      const isChrome = /Chrome/i.test(navigator.userAgent);
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const isLocalIP = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/i.test(window.location.hostname);
+      const isIPAddress = isLocalIP || /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname);
+      
+      if (isAndroid && isChrome && isIPAddress && !isLocalhost) {
+        console.warn('[FirebaseService] 检测到Android Chrome设备在IP地址上访问，这是已知的问题');
+        return {
+          success: false,
+          error: 'Android Chrome设备不支持在IP地址上进行Google登录。请使用邮箱密码登录，或使用localhost访问，或在桌面浏览器上访问。',
+          errorCode: 'android_ip_restriction'
+        };
+      }
+      
       return {
         success: false,
-        error: error.message || '登录失败'
+        error: errorMessage
       };
     }
   }
