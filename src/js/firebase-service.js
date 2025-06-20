@@ -446,7 +446,6 @@ class FirebaseServiceClass {
       console.log(`[FirebaseService] 设备信息: 移动=${isMobile}, Android=${isAndroid}, Chrome=${isChrome}`);
       console.log(`[FirebaseService] 用户代理: ${navigator.userAgent}`);
       console.log(`[FirebaseService] 当前URL: ${window.location.href}`);
-      console.log(`[FirebaseService] Firebase配置: authDomain=${window.FIREBASE_CONFIG.authDomain}`);
       
       // 确保Firebase已初始化
       if (!this.initialized || !this.auth) {
@@ -473,25 +472,6 @@ class FirebaseServiceClass {
         console.log('[FirebaseService] 检测到Android设备，使用弹窗方式登录');
         
         try {
-          // 确保使用正确的authDomain
-          if (window.FIREBASE_CONFIG.authDomain !== window.location.hostname && 
-              window.location.hostname !== 'localhost' && 
-              window.location.hostname !== '127.0.0.1') {
-            console.log('[FirebaseService] 更新authDomain为当前主机名');
-            // 临时更新配置中的authDomain为当前主机名
-            window.FIREBASE_CONFIG.authDomain = window.location.hostname;
-            
-            // 重新初始化Firebase以应用新的authDomain
-            try {
-              await this.auth.app.delete();
-              this.app = firebase.initializeApp(window.FIREBASE_CONFIG);
-              this.auth = this.app.auth();
-              console.log('[FirebaseService] 使用更新后的authDomain重新初始化Firebase');
-            } catch (reInitError) {
-              console.error('[FirebaseService] 重新初始化Firebase失败:', reInitError);
-            }
-          }
-          
           // 显式使用弹窗方法
           console.log('[FirebaseService] 尝试使用signInWithPopup方法');
           const result = await this.auth.signInWithPopup(provider);
@@ -564,6 +544,8 @@ class FirebaseServiceClass {
             errorMessage = '此用户账号已被禁用。请联系管理员。';
           } else if (error.code === 'auth/operation-not-allowed') {
             errorMessage = 'Google登录方式未在Firebase控制台中启用。';
+          } else if (error.code === 'auth/api-key-not-valid') {
+            errorMessage = 'Firebase API密钥无效。请检查Firebase配置。';
           } else {
             errorMessage = `登录失败: ${error.message || '未知错误'}`;
           }
@@ -666,6 +648,8 @@ class FirebaseServiceClass {
             errorMessage = '登录弹窗被浏览器阻止。请允许弹窗后重试。';
           } else if (error.code === 'auth/popup-closed-by-user') {
             errorMessage = '登录弹窗被关闭。请完成登录过程。';
+          } else if (error.code === 'auth/api-key-not-valid') {
+            errorMessage = 'Firebase API密钥无效。请检查Firebase配置。';
           } else {
             errorMessage = `登录失败: ${error.message || '未知错误'}`;
           }
