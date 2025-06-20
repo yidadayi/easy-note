@@ -39,7 +39,14 @@ class FirebaseServiceClass {
         throw new Error('找不到Firebase配置信息');
       }
       
+      // 检查API密钥是否存在
+      if (!config.apiKey) {
+        console.error('[FirebaseService] Firebase API密钥未设置');
+        throw new Error('Firebase API密钥未设置，请检查配置');
+      }
+      
       console.log('[FirebaseService] 配置信息:', JSON.stringify({
+        apiKey: '***隐藏***',
         authDomain: config.authDomain,
         projectId: config.projectId
       }));
@@ -52,6 +59,7 @@ class FirebaseServiceClass {
           console.warn('[FirebaseService] Firebase应用已存在，获取已有实例');
           this.app = firebase.app();
         } else {
+          console.error('[FirebaseService] Firebase初始化失败:', initError);
           throw initError;
         }
       }
@@ -65,6 +73,13 @@ class FirebaseServiceClass {
         }
       } catch (authError) {
         console.error('[FirebaseService] 认证服务初始化失败:', authError);
+        
+        // 特别处理API密钥错误
+        if (authError.code === 'auth/invalid-api-key' || authError.code === 'auth/api-key-not-valid') {
+          console.error('[FirebaseService] API密钥无效，请检查Firebase配置');
+          throw new Error('Firebase API密钥无效，请检查配置');
+        }
+        
         throw new Error('Firebase认证服务初始化失败: ' + authError.message);
       }
       

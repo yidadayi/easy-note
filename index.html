@@ -378,6 +378,13 @@
             messagingSenderId: "1035389970323",
             appId: "1:1035389970323:web:c4e38c5b7a2d2c9d6c8a7e"
         };
+
+        // 确保Firebase配置正确加载
+        console.log('[Firebase初始化] 配置已加载:', {
+            apiKey: '***隐藏***',
+            authDomain: window.FIREBASE_CONFIG.authDomain,
+            projectId: window.FIREBASE_CONFIG.projectId
+        });
     </script>
     <script src="src/js/firebase-service.js"></script>
     <script src="src/js/ui-controller.js"></script>
